@@ -111,11 +111,15 @@ def main():
     q_max = 5.0          # Max absolute inventory (BTC)
     lot_size = 0.01      # Lot size per execution (BTC)
     fixed_spread = 6.0   # Fixed spread for Naive ($6.00 ~ 0.85 bps)
-    gamma_static = 1e-4  # Static AS risk aversion
-    gamma_0 = 1e-4       # Advanced AS base risk aversion
-    eta = 4.0            # Advanced AS non-linear penalty multiplier
+    gamma_static = 5e-6  # Static AS risk aversion (tuned for active market participation)
+    gamma_0 = 5e-6       # Advanced AS base risk aversion
+    eta = 3.0            # Advanced AS non-linear penalty multiplier
     alpha = 2.0          # Quadratic penalty exponent
     T_horizon = 86400.0  # 24 hours in seconds
+    
+    # Baseline AS spread at q=0
+    baseline_as_spread = (2.0 / gamma_static) * np.log(1.0 + gamma_static / k)
+    print(f"  -> Baseline AS Spread (q=0): ${baseline_as_spread:.2f} vs Naive Fixed Spread: ${fixed_spread:.2f}")
     
     backtester = Backtester(
         merged_data=merged_with_vol,

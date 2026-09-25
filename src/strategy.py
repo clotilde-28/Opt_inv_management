@@ -83,7 +83,7 @@ class StaticASStrategy(BaseStrategy):
 
     def __init__(
         self,
-        gamma: float = 1e-4,
+        gamma: float = 5e-6,
         static_sigma: float = 4.5,
         q_max: float = 5.0,
         lot_size: float = 0.01,
@@ -135,8 +135,8 @@ class AdvancedASStrategy(BaseStrategy):
 
     def __init__(
         self,
-        gamma_0: float = 1e-4,
-        eta: float = 4.0,
+        gamma_0: float = 5e-6,
+        eta: float = 3.0,
         alpha: float = 2.0,
         q_max: float = 5.0,
         lot_size: float = 0.01,
