@@ -19,29 +19,81 @@ def compute_max_drawdown(pnl_series: np.ndarray) -> float:
 
 def compute_sharpe_ratio(
     pnl_series: np.ndarray, 
-    dt_series: np.ndarray, 
-    annualization_factor: float = np.sqrt(365 * 24 * 3600)
+    time_series: np.ndarray, 
+    freq: str = "5min",
+    risk_free_rate: float = 0.04,
+    capital: float = 100_000.0,
+    annualization_factor: float = None
 ) -> float:
     """
-    Estimate annualized Sharpe ratio from discrete PnL increments.
+    Calculate annualized Sharpe ratio from discrete binned period returns.
+    
+    Parameters
+    ----------
+    pnl_series : np.ndarray
+        Cumulative Mark-to-Market PnL array ($).
+    time_series : np.ndarray or pd.Series or pd.DatetimeIndex
+        Array of time steps dt (in seconds), timestamps, or datetime objects.
+    freq : str, default "5min"
+        Resampling interval (e.g. "5min" for 5-minute bins, "1h" for hourly bins).
+    risk_free_rate : float, default 0.04
+        Annualized risk-free rate (e.g. 0.04 for 4%).
+    capital : float, default 100,000.0
+        Nominal capital allocation ($) used to compute discrete period returns.
+    annualization_factor : float, optional
+        Custom annualization scalar. If None, automatically computed as
+        sqrt(periods_per_year) (e.g., sqrt(288 * 365) for 5min, sqrt(24 * 365) for 1h).
     """
     if len(pnl_series) < 2:
         return 0.0
         
-    diffs = np.diff(pnl_series)
-    std_diff = np.std(diffs)
-    if std_diff <= 1e-8:
+    # Convert time_series into DatetimeIndex
+    if isinstance(time_series, (pd.DatetimeIndex, pd.Series)) and pd.api.types.is_datetime64_any_dtype(time_series):
+        dt_idx = pd.DatetimeIndex(time_series)
+    elif isinstance(time_series, np.ndarray) and np.issubdtype(time_series.dtype, np.datetime64):
+        dt_idx = pd.DatetimeIndex(time_series)
+    else:
+        # Check if Unix timestamps or dt array
+        ts_arr = np.asarray(time_series)
+        if len(ts_arr) > 0 and ts_arr[0] > 1e9:
+            unit = "ms" if ts_arr[0] < 1e12 else "us"
+            dt_idx = pd.to_datetime(ts_arr, unit=unit)
+        else:
+            # Array of inter-arrival seconds dt
+            cum_seconds = np.cumsum(ts_arr)
+            base_time = pd.Timestamp("2024-04-01 00:00:00")
+            dt_idx = base_time + pd.to_timedelta(cum_seconds, unit="s")
+            
+    pnl_s = pd.Series(pnl_series, index=dt_idx)
+    # Deduplicate index if multiple trades share the same microsecond
+    pnl_s = pnl_s[~pnl_s.index.duplicated(keep="last")]
+    
+    # Resample PnL to regular fixed time bins
+    resampled_pnl = pnl_s.resample(freq).last().ffill().bfill()
+    period_pnl = resampled_pnl.diff().dropna()
+    if len(period_pnl) < 2:
         return 0.0
         
-    # Average time step
-    mean_dt = np.mean(dt_series[1:]) if len(dt_series) > 1 else 1.0
-    if mean_dt <= 0:
-        mean_dt = 1.0
+    # Discrete period returns
+    period_returns = period_pnl / capital
+    
+    # Determine periods per year and annualization scalar
+    bin_seconds = pd.Timedelta(freq).total_seconds()
+    periods_per_day = 86400.0 / bin_seconds
+    periods_per_year = periods_per_day * 365.0
+    
+    ann_scalar = np.sqrt(periods_per_year) if annualization_factor is None else annualization_factor
+    
+    # Adjust annual risk-free rate for bin frequency
+    rf_period = risk_free_rate / periods_per_year
+    excess_returns = period_returns - rf_period
+    
+    std_returns = float(np.std(period_returns, ddof=1))
+    if std_returns <= 1e-12:
+        return 0.0
         
-    # Step Sharpe scaled to annual
-    step_sharpe = np.mean(diffs) / std_diff
-    annual_sharpe = step_sharpe * np.sqrt((365 * 24 * 3600) / mean_dt)
-    return float(annual_sharpe)
+    sharpe = (float(np.mean(excess_returns)) / std_returns) * ann_scalar
+    return float(sharpe)
 
 
 def compute_var_cvar(pnl_distribution: np.ndarray, alpha: float = 0.99) -> Tuple[float, float]:
