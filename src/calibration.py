@@ -112,52 +112,6 @@ class MarketCalibrator:
         
         return rolling_std
 
-    def compute_ema_volatility(
-        self,
-        span_sec: float = 300.0,
-        resample_interval: str = "1s"
-    ) -> pd.Series:
-        """
-        Compute Exponential Moving Average (EMA) of volatility of 1-second price differences:
-        sigma_{EMA, t} = sqrt(EMA( (Delta S_t)^2 ))
-        Smooths high-frequency noise and eliminates sudden boundary drop-off jumps.
-        """
-        s_1s = self.data.set_index("datetime")["mid_price"].resample(resample_interval).last().ffill()
-        diffs_1s = s_1s.diff().fillna(0.0)
-        sq_diffs = diffs_1s ** 2
-        span_pts = max(int(span_sec), 10)
-        ema_var = sq_diffs.ewm(span=span_pts, adjust=False).mean()
-        ema_sigma = np.sqrt(np.maximum(ema_var, 1e-4))
-        return ema_sigma
-
-    def compute_order_flow_imbalance(
-        self,
-        span_sec: float = 60.0,
-        resample_interval: str = "1s"
-    ) -> pd.Series:
-        """
-        Compute continuous localized Order Flow Imbalance (OFI) via EMA smoothing of signed trade volume:
-        OFI_t = (Buy_Vol - Sell_Vol) / (Buy_Vol + Sell_Vol) in [-1, +1].
-        """
-        df_buys = self.data[self.data["side"] == "buy"]
-        df_sells = self.data[self.data["side"] == "sell"]
-        
-        s_1s = self.data.set_index("datetime")["mid_price"].resample(resample_interval).last()
-        idx_grid = s_1s.index
-        
-        buy_vol = df_buys.set_index("datetime")["amount"].resample(resample_interval).sum().reindex(idx_grid, fill_value=0.0)
-        sell_vol = df_sells.set_index("datetime")["amount"].resample(resample_interval).sum().reindex(idx_grid, fill_value=0.0)
-        
-        net_vol = buy_vol - sell_vol
-        tot_vol = buy_vol + sell_vol
-        
-        span_pts = max(int(span_sec), 5)
-        smooth_net = net_vol.ewm(span=span_pts, adjust=False).mean()
-        smooth_tot = tot_vol.ewm(span=span_pts, adjust=False).mean()
-        
-        ofi = (smooth_net / (smooth_tot + 1e-5)).clip(-0.8, 0.8)
-        return ofi
-
     def estimate_empirical_gbm_params(self) -> Tuple[float, float, float]:
         """
         Estimate empirical S0, drift mu (per second), and volatility sigma (per sqrt(second))

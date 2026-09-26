@@ -152,18 +152,16 @@ def plot_historical_comparison(
 
 def plot_advanced_as_deep_dive(
     adv_data: Dict[str, any],
-    raw_sigmas: Optional[np.ndarray] = None,
     q_max: float = 5.0,
     save_path: str = "figures/advanced_as_deep_dive.png",
     downsample_factor: int = 15,
     window_hours: float = 2.0
 ) -> str:
     """
-    Figure 2: Advanced AS Deep Dive (4 subplots in one figure):
-    - Subplot 1 (Top): Mid-Price along with the dynamic Bid/Ask quotes showing skewing and spread widening (2h zoom).
-    - Subplot 2: Dynamic Volatility Trajectory (sigma_t): EMA Volatility vs Raw Rolling Volatility over the full 24h horizon.
-    - Subplot 3: Full 24-hour Inventory trajectory (q_t) exhibiting rapid mean reversion.
-    - Subplot 4 (Bottom): Exact PnL Decomposition into Realized PnL vs Unrealized PnL vs Total MtM.
+    Figure 2: Advanced AS Deep Dive (3 subplots in one figure):
+    - Top: Mid-Price along with the dynamic Bid/Ask quotes showing the skewing mechanism and spread widening.
+    - Middle: Inventory trajectory.
+    - Bottom: Decomposition of the Advanced AS PnL into Realized PnL vs Unrealized PnL.
     """
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     
@@ -176,10 +174,6 @@ def plot_advanced_as_deep_dive(
     unrealized = adv_data["unrealized_pnl"]
     tot_pnl = adv_data["total_pnl"]
     
-    # Volatility series
-    ema_vol = adv_data.get("ema_sigmas", adv_data.get("rolling_sigmas", None))
-    raw_vol = raw_sigmas if raw_sigmas is not None else adv_data.get("raw_sigmas", None)
-    
     # For Top Plot: Select a highly active 2-hour window to vividly display quote skewing and spread widening
     start_time = datetimes.iloc[0] + pd.Timedelta(hours=4.0)
     end_time = start_time + pd.Timedelta(hours=window_hours)
@@ -189,15 +183,16 @@ def plot_advanced_as_deep_dive(
     sub_mid = mids[mask][::downsample_factor]
     sub_ask = asks[mask][::downsample_factor]
     sub_bid = bids[mask][::downsample_factor]
+    sub_inv = inv[mask][::downsample_factor]
     
-    fig, axes = plt.subplots(4, 1, figsize=(14, 14))
-    fig.suptitle("Advanced Avellaneda-Stoikov Deep Dive: Dynamic Quotes, Volatility Dampening & PnL Decomposition", y=0.98)
+    fig, axes = plt.subplots(3, 1, figsize=(14, 11))
+    fig.suptitle("Advanced Avellaneda-Stoikov Deep Dive: Dynamic Quotes, Inventory & PnL Decomposition", y=0.98)
     
     # 1. Top Subplot: Dynamic Quotes & Microstructure Skewing (2-hour Detailed Window)
     ax0 = axes[0]
     ax0.plot(sub_dt, sub_mid, color=COLOR_MID, linewidth=1.5, label="Mid-Price ($S_t$)")
-    ax0.plot(sub_dt, sub_ask, color=COLOR_ASK, linewidth=1.1, linestyle="--", alpha=0.9, label=r"Dynamic Ask Quote ($r_t^a$)")
-    ax0.plot(sub_dt, sub_bid, color=COLOR_BID, linewidth=1.1, linestyle="--", alpha=0.9, label=r"Dynamic Bid Quote ($r_t^b$)")
+    ax0.plot(sub_dt, sub_ask, color=COLOR_ASK, linewidth=1.1, linestyle="--", alpha=0.9, label="Dynamic Ask Quote ($r_t^a$)")
+    ax0.plot(sub_dt, sub_bid, color=COLOR_BID, linewidth=1.1, linestyle="--", alpha=0.9, label="Dynamic Bid Quote ($r_t^b$)")
     ax0.fill_between(sub_dt, sub_bid, sub_ask, color="#0D9488", alpha=0.12, label=r"Dynamic AS Spread ($\delta_t$)")
     
     ax0.set_title(f"Dynamic Bid/Ask Quotes & Inventory Skewing (Detailed {window_hours}h Regime)")
@@ -206,67 +201,45 @@ def plot_advanced_as_deep_dive(
     ax0.grid(True)
     ax0.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: f"${x:,.1f}"))
     
-    # 2. Subplot 2: Dynamic Volatility Trajectory (sigma_t): EMA Volatility vs Raw Rolling Volatility
+    # 2. Middle Subplot: Inventory Trajectory over the entire 24 hours
     ax1 = axes[1]
     ds_dt = datetimes[::downsample_factor]
-    
-    if raw_vol is not None:
-        ds_raw_vol = raw_vol[::downsample_factor]
-        ax1.plot(
-            ds_dt, ds_raw_vol, 
-            color="#94A3B8", linewidth=1.0, alpha=0.75, 
-            label="Raw Rolling Std (5-min window: noisy, sudden boundary drop-offs)"
-        )
-    if ema_vol is not None:
-        ds_ema_vol = ema_vol[::downsample_factor]
-        ax1.plot(
-            ds_dt, ds_ema_vol, 
-            color="#0284C7", linewidth=1.6, 
-            label=r"EMA Smoothed Volatility ($\sigma_t$, span=300s: smooth transitions, dampens noise)"
-        )
-        
-    ax1.axvspan(start_time, end_time, color="#FDE047", alpha=0.20, label=f"Top Plot Regime ({window_hours}h)")
-    ax1.set_title(r"Dynamic Volatility Trajectory ($\sigma_t$): Continuous EMA Smoothing vs Raw Rolling Window")
-    ax1.set_ylabel(r"Volatility $\sigma_t$ ($\$/\sqrt{\mathrm{s}}$)")
-    ax1.legend(loc="upper right", frameon=True, facecolor="#F8FAFC", edgecolor="#CBD5E1")
-    ax1.grid(True)
-    
-    # 3. Subplot 3: Inventory Trajectory over the entire 24 hours
-    ax2 = axes[2]
     ds_inv = inv[::downsample_factor]
     
-    ax2.plot(ds_dt, ds_inv, color=COLOR_ADVANCED, linewidth=1.4, label="Advanced AS Inventory ($q_t$)")
-    ax2.axhline(q_max, color="#991B1B", linestyle=":", linewidth=1.3, label=f"Max Limit (+{q_max} BTC)")
-    ax2.axhline(-q_max, color="#991B1B", linestyle=":", linewidth=1.3, label=f"Min Limit (-{q_max} BTC)")
-    ax2.axhline(0.0, color="#64748B", linestyle="-", linewidth=0.8, alpha=0.5)
-    ax2.axvspan(start_time, end_time, color="#FDE047", alpha=0.20, label=f"Top Plot Window ({window_hours}h)")
+    ax1.plot(ds_dt, ds_inv, color=COLOR_ADVANCED, linewidth=1.4, label="Advanced AS Inventory ($q_t$)")
+    ax1.axhline(q_max, color="#991B1B", linestyle=":", linewidth=1.3, label=f"Max Limit (+{q_max} BTC)")
+    ax1.axhline(-q_max, color="#991B1B", linestyle=":", linewidth=1.3, label=f"Min Limit (-{q_max} BTC)")
+    ax1.axhline(0.0, color="#64748B", linestyle="-", linewidth=0.8, alpha=0.5)
     
-    ax2.set_title("Full 24-Hour Inventory Trajectory ($q_t$) with Adaptive Mean-Reversion")
-    ax2.set_ylabel("Inventory (BTC)")
-    ax2.set_ylim(-q_max * 1.25, q_max * 1.25)
-    ax2.legend(loc="upper left", frameon=True, facecolor="#F8FAFC", edgecolor="#CBD5E1", ncol=2)
-    ax2.grid(True)
+    # Highlight the zoom window
+    ax1.axvspan(start_time, end_time, color="#FDE047", alpha=0.25, label=f"Top Plot Window ({window_hours}h)")
     
-    # 4. Subplot 4 (Bottom): PnL Decomposition (Realized vs Unrealized vs Total MtM)
-    ax3 = axes[3]
+    ax1.set_title("Full 24-Hour Inventory Trajectory ($q_t$) with Adaptive Mean-Reversion")
+    ax1.set_ylabel("Inventory (BTC)")
+    ax1.set_ylim(-q_max * 1.25, q_max * 1.25)
+    ax1.legend(loc="upper left", frameon=True, facecolor="#F8FAFC", edgecolor="#CBD5E1", ncol=2)
+    ax1.grid(True)
+    
+    # 3. Bottom Subplot: PnL Decomposition (Realized vs Unrealized vs Total MtM)
+    ax2 = axes[2]
     ds_real = realized[::downsample_factor]
     ds_unreal = unrealized[::downsample_factor]
     ds_tot = tot_pnl[::downsample_factor]
     
-    ax3.plot(ds_dt, ds_tot, color="#0F172A", linewidth=1.8, label=f"Total MtM PnL ($X_t + q_t S_t$) — End: ${ds_tot[-1]:,.1f}")
-    ax3.plot(ds_dt, ds_real, color=COLOR_REALIZED, linewidth=1.3, label=f"Realized PnL (Locked Cash) — End: ${ds_real[-1]:,.1f}")
-    ax3.plot(ds_dt, ds_unreal, color=COLOR_UNREALIZED, linewidth=1.2, linestyle="-.", label="Unrealized PnL ($q_t(S_t - C_t)$)")
-    ax3.axhline(0.0, color="#64748B", linestyle="-", linewidth=0.8, alpha=0.5)
+    ax2.plot(ds_dt, ds_tot, color="#0F172A", linewidth=1.8, label=f"Total MtM PnL ($X_t + q_t S_t$) — End: ${ds_tot[-1]:,.1f}")
+    ax2.plot(ds_dt, ds_real, color=COLOR_REALIZED, linewidth=1.3, label=f"Realized PnL (Locked Cash) — End: ${ds_real[-1]:,.1f}")
+    ax2.plot(ds_dt, ds_unreal, color=COLOR_UNREALIZED, linewidth=1.2, linestyle="-.", label="Unrealized PnL ($q_t(S_t - C_t)$)")
+    ax2.axhline(0.0, color="#64748B", linestyle="-", linewidth=0.8, alpha=0.5)
     
-    ax3.set_title("Advanced AS PnL Decomposition: Realized vs Unrealized vs Total Mark-to-Market")
-    ax3.set_ylabel("PnL ($)")
-    ax3.set_xlabel("Time (UTC)")
-    ax3.legend(loc="upper left", frameon=True, facecolor="#F8FAFC", edgecolor="#CBD5E1")
-    ax3.grid(True)
-    ax3.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: f"${x:,.0f}"))
+    ax2.set_title("Advanced AS PnL Decomposition: Realized vs Unrealized vs Total Mark-to-Market")
+    ax2.set_ylabel("PnL ($)")
+    ax2.set_xlabel("Time (UTC)")
+    ax2.legend(loc="upper left", frameon=True, facecolor="#F8FAFC", edgecolor="#CBD5E1")
+    ax2.grid(True)
+    ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: f"${x:,.0f}"))
     
     plt.tight_layout()
-    plt.subplots_adjust(top=0.95)
+    plt.subplots_adjust(top=0.94)
     plt.savefig(save_path, dpi=300)
     plt.close()
     return save_path
@@ -280,8 +253,8 @@ def plot_monte_carlo_distribution(
     Figure 3: Monte Carlo PnL Distribution (1 plot):
     - Kernel Density Estimation (KDE) plot showing distribution of Terminal PnL for Naive, AS Static, Advanced AS.
     - Distinct colors and alpha=0.4 fill area.
-    - 99% Conditional VaR (CVaR) vertical dashed lines for all three strategies.
-    - Rigid, perfectly aligned table generated via matplotlib.table.table (ax.table).
+    - 99% Conditional VaR (CVaR) vertical lines for the three strategies.
+    - Comprehensive textbox table summarizing Mean PnL, Std Dev, 99% VaR, 99% CVaR.
     """
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     
@@ -310,12 +283,10 @@ def plot_monte_carlo_distribution(
             label=f"{s_name} (Std: ${mc_results[s_name]['std']:.1f})"
         )
         
-        # 99% CVaR vertical dashed line up to table boundary
+        # 99% CVaR vertical dashed line only
         cvar_val = mc_results[s_name]["cvar_99"]
         ax.axvline(
             cvar_val,
-            ymin=0.0,
-            ymax=0.62,
             color=c,
             linestyle="--",
             linewidth=2.0,
@@ -328,55 +299,37 @@ def plot_monte_carlo_distribution(
     ax.set_ylabel("Probability Density")
     ax.grid(True, linestyle="--", alpha=0.6)
     ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: f"${x:,.0f}"))
-    y_min, y_max = ax.get_ylim()
-    ax.set_ylim(0, y_max * 1.18)
     
-    # Rigid, perfectly aligned table using ax.table
-    col_labels = ["Strategy", "Mean PnL", "Std Dev", "99% VaR", "99% CVaR"]
-    cell_text = []
-    cell_colors = []
-    
-    row_bg_tints = {
-        "Naive": ["#FEE2E2"] * 5,
-        "Static AS": ["#E0F2FE"] * 5,
-        "Advanced AS": ["#CCFBF1"] * 5
-    }
-    
+    # Comprehensive textbox table summarizing Mean, Std, 99% VaR, 99% CVaR
+    table_text = (
+        "  Strategy       Mean PnL    Std Dev    99% VaR    99% CVaR\n"
+        "  ---------------------------------------------------------\n"
+    )
     for s_name in strats:
         st = mc_results[s_name]
-        sign_var = "+" if st['var_99'] > 0 else ""
-        sign_cvar = "+" if st['cvar_99'] > 0 else ""
-        cell_text.append([
-            s_name,
-            f"${st['mean']:,.2f}",
-            f"${st['std']:,.2f}",
-            f"{sign_var}${st['var_99']:,.2f}",
-            f"{sign_cvar}${st['cvar_99']:,.2f}"
-        ])
-        cell_colors.append(row_bg_tints[s_name])
+        table_text += (
+            f"  {s_name:<13} "
+            f"${st['mean']:>7.1f}   "
+            f"${st['std']:>7.1f}   "
+            f"${st['var_99']:>7.1f}   "
+            f"${st['cvar_99']:>7.1f}\n"
+        )
         
-    the_table = ax.table(
-        cellText=cell_text,
-        colLabels=col_labels,
-        cellColours=cell_colors,
-        colColours=["#E2E8F0"] * 5,
-        loc="upper left",
-        bbox=[0.02, 0.67, 0.40, 0.27],
-        zorder=10
+    ax.text(
+        0.03, 0.95,
+        table_text,
+        transform=ax.transAxes,
+        fontsize=10.0,
+        fontfamily="monospace",
+        verticalalignment="top",
+        bbox=dict(
+            boxstyle="round,pad=0.6",
+            facecolor="#F8FAFC",
+            edgecolor="#94A3B8",
+            linewidth=1.2,
+            alpha=0.95
+        )
     )
-    the_table.auto_set_font_size(False)
-    the_table.set_fontsize(9.5)
-    the_table.set_zorder(10)
-    
-    for (r, c), cell in the_table.get_celld().items():
-        cell.set_edgecolor("#94A3B8")
-        cell.set_linewidth(1.0)
-        cell.set_alpha(1.0)
-        cell.set_zorder(10)
-        if r == 0:
-            cell.set_text_props(weight="bold", color="#0F172A")
-        else:
-            cell.set_text_props(color="#1E293B")
     
     ax.legend(loc="upper right", frameon=True, facecolor="#F8FAFC", edgecolor="#CBD5E1", fontsize=9.5)
     

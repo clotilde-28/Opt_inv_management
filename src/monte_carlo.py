@@ -27,9 +27,7 @@ def _run_mc_kernel(
     alpha: float,
     q_max: float,
     lot_size: float,
-    max_spread: float = 25.0,
-    kappa: float = 0.35,
-    ema_window_sec: float = 300.0
+    ema_window_sec: float = 60.0
 ):
     """
     Numba-accelerated Monte Carlo simulation across M paths and N time steps.
@@ -40,7 +38,6 @@ def _run_mc_kernel(
     pnl_advanced = np.zeros(M)
     
     alpha_ema = 1.0 - np.exp(-dt / ema_window_sec)
-    alpha_ofi = 1.0 - np.exp(-dt / 60.0)
     
     for m in range(M):
         S = S0
@@ -57,7 +54,6 @@ def _run_mc_kernel(
         q_a = 0.0
         cash_a = 0.0
         rolling_var = sigma ** 2
-        ofi = 0.0
         
         for i in range(N):
             t = i * dt
@@ -68,14 +64,10 @@ def _run_mc_kernel(
             dS = mu * dt + sigma * np.sqrt(dt) * z
             S += dS
             
-            # Update EMA volatility proxy
+            # Update rolling volatility proxy
             inst_var = (dS ** 2) / dt
             rolling_var = (1.0 - alpha_ema) * rolling_var + alpha_ema * inst_var
             rolling_sig = np.sqrt(max(rolling_var, 1e-4))
-            
-            # Update localized OFI proxy from price shock direction
-            ofi = (1.0 - alpha_ofi) * ofi + alpha_ofi * (z / 3.0)
-            ofi = min(max(ofi, -0.8), 0.8)
             
             # Common random variables for paired order arrival across strategies
             u_ask = np.random.random()
@@ -110,27 +102,16 @@ def _run_mc_kernel(
                 cash_s -= (S - d_b_s) * lot_size
                 q_s += lot_size
                 
-            # --- Strategy 3: Advanced AS (EMA Vol, Spread Cap, Asymmetric k) ---
+            # --- Strategy 3: Advanced AS ---
             norm_q = min(abs(q_a) / q_max, 1.0)
             gamma_q = gamma_0 * (1.0 + eta * (norm_q ** alpha))
             var_tau_a = (rolling_sig ** 2) * tau
+            spr_a = gamma_q * var_tau_a + (2.0 / gamma_q) * np.log(1.0 + gamma_q / k)
+            d_a_a = max(0.5 * spr_a - q_a * gamma_q * var_tau_a, 0.01)
+            d_b_a = max(0.5 * spr_a + q_a * gamma_q * var_tau_a, 0.01)
             
-            ka = k * (1.0 - kappa * ofi)
-            kb = k * (1.0 + kappa * ofi)
-            d_a_base = 0.5 * gamma_q * var_tau_a + (1.0 / gamma_q) * np.log(1.0 + gamma_q / ka)
-            d_b_base = 0.5 * gamma_q * var_tau_a + (1.0 / gamma_q) * np.log(1.0 + gamma_q / kb)
-            raw_spr = d_a_base + d_b_base
-            
-            if raw_spr > max_spread:
-                scale = max_spread / raw_spr
-                d_a_base *= scale
-                d_b_base *= scale
-                
-            d_a_a = min(max(d_a_base - q_a * gamma_q * var_tau_a, 0.01), max_spread)
-            d_b_a = min(max(d_b_base + q_a * gamma_q * var_tau_a, 0.01), max_spread)
-            
-            prob_a_a = 1.0 - np.exp(-A * np.exp(-ka * d_a_a) * dt)
-            prob_b_a = 1.0 - np.exp(-A * np.exp(-kb * d_b_a) * dt)
+            prob_a_a = 1.0 - np.exp(-A * np.exp(-k * d_a_a) * dt)
+            prob_b_a = 1.0 - np.exp(-A * np.exp(-k * d_b_a) * dt)
             
             if u_ask < prob_a_a and q_a > -q_max:
                 cash_a += (S + d_a_a) * lot_size
@@ -169,8 +150,6 @@ class MonteCarloEngine:
         alpha: float = 2.0,
         q_max: float = 5.0,
         lot_size: float = 0.01,
-        max_spread: float = 25.0,
-        kappa: float = 0.35,
         random_seed: int = 42
     ):
         self.S0 = S0
@@ -188,8 +167,6 @@ class MonteCarloEngine:
         self.alpha = alpha
         self.q_max = q_max
         self.lot_size = lot_size
-        self.max_spread = max_spread
-        self.kappa = kappa
         self.random_seed = random_seed
 
     def simulate(self) -> Dict[str, any]:
@@ -203,8 +180,7 @@ class MonteCarloEngine:
             M=2, N=5, dt=self.dt, S0=self.S0, mu=self.mu, sigma=self.sigma,
             A=self.A, k=self.k, fixed_spread=self.fixed_spread,
             gamma_static=self.gamma_static, gamma_0=self.gamma_0,
-            eta=self.eta, alpha=self.alpha, q_max=self.q_max, lot_size=self.lot_size,
-            max_spread=self.max_spread, kappa=self.kappa
+            eta=self.eta, alpha=self.alpha, q_max=self.q_max, lot_size=self.lot_size
         )
         
         # Full simulation
@@ -212,8 +188,7 @@ class MonteCarloEngine:
             M=self.M, N=self.N, dt=self.dt, S0=self.S0, mu=self.mu, sigma=self.sigma,
             A=self.A, k=self.k, fixed_spread=self.fixed_spread,
             gamma_static=self.gamma_static, gamma_0=self.gamma_0,
-            eta=self.eta, alpha=self.alpha, q_max=self.q_max, lot_size=self.lot_size,
-            max_spread=self.max_spread, kappa=self.kappa
+            eta=self.eta, alpha=self.alpha, q_max=self.q_max, lot_size=self.lot_size
         )
         
         # Calculate statistics
