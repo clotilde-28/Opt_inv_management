@@ -77,25 +77,44 @@ def main():
     static_sigma = calibrator.estimate_static_volatility(first_n_minutes=30.0)
     print(f"  -> Initial Static Volatility (sigma_0, first 30m): ${static_sigma:.4f} /sqrt(s)")
     
-    # Compute rolling volatility series (5-minute rolling window)
-    print("  -> Computing rolling volatility (sigma_t, 5-min window)...")
-    rolling_vol_series = calibrator.compute_rolling_volatility(window_sec=300.0)
+    # Compute continuous EMA smoothed volatility (span = 300 seconds / 5 minutes)
+    print("  -> Computing EMA smoothed volatility (span=300s) & raw rolling volatility...")
+    ema_vol_series = calibrator.compute_ema_volatility(span_sec=300.0)
+    raw_vol_series = calibrator.compute_rolling_volatility(window_sec=300.0)
     
-    # Map rolling vol onto the merged trade timestamps
-    roll_df = pd.DataFrame({
-        "datetime": rolling_vol_series.index,
-        "rolling_sigma": rolling_vol_series.values
+    # Compute localized Order Flow Imbalance (OFI) for asymmetric liquidity k_bid, k_ask
+    print("  -> Computing localized Order Flow Imbalance (OFI, span=60s)...")
+    ofi_series = calibrator.compute_order_flow_imbalance(span_sec=60.0)
+    
+    # Map volatility and OFI onto the merged trade timestamps
+    vol_df = pd.DataFrame({
+        "datetime": ema_vol_series.index,
+        "ema_sigma": ema_vol_series.values,
+        "raw_sigma": raw_vol_series.values,
+        "ofi": ofi_series.values
     }).dropna()
     
     merged_with_vol = pd.merge_asof(
         merged_data,
-        roll_df,
+        vol_df,
         on="datetime",
         direction="backward"
     )
-    merged_with_vol["rolling_sigma"] = merged_with_vol["rolling_sigma"].bfill().fillna(static_sigma)
-    rolling_sigma_arr = merged_with_vol["rolling_sigma"].values.astype(np.float64)
-    print(f"  -> Rolling Volatility stats: mean=${rolling_sigma_arr.mean():.2f}, min=${rolling_sigma_arr.min():.2f}, max=${rolling_sigma_arr.max():.2f}")
+    merged_with_vol["ema_sigma"] = merged_with_vol["ema_sigma"].bfill().fillna(static_sigma)
+    merged_with_vol["raw_sigma"] = merged_with_vol["raw_sigma"].bfill().fillna(static_sigma)
+    merged_with_vol["ofi"] = merged_with_vol["ofi"].bfill().fillna(0.0)
+    
+    ema_sigma_arr = merged_with_vol["ema_sigma"].values.astype(np.float64)
+    raw_sigma_arr = merged_with_vol["raw_sigma"].values.astype(np.float64)
+    ofi_arr = merged_with_vol["ofi"].values.astype(np.float64)
+    
+    # Dynamic asymmetric fill decay parameters: k_bid and k_ask
+    kappa = 0.35
+    k_bid_arr = (k * (1.0 + kappa * ofi_arr)).clip(0.1, 1.0).astype(np.float64)
+    k_ask_arr = (k * (1.0 - kappa * ofi_arr)).clip(0.1, 1.0).astype(np.float64)
+    
+    print(f"  -> EMA Volatility stats: mean=${ema_sigma_arr.mean():.2f}, min=${ema_sigma_arr.min():.2f}, max=${ema_sigma_arr.max():.2f}")
+    print(f"  -> Asymmetric Liquidity: k_base={k:.4f} | k_bid range=[{k_bid_arr.min():.4f}, {k_bid_arr.max():.4f}] | k_ask range=[{k_ask_arr.min():.4f}, {k_ask_arr.max():.4f}]")
     
     # Estimate full-horizon drift and volatility for Monte Carlo
     S0, mu_emp, sigma_emp = calibrator.estimate_empirical_gbm_params()
@@ -111,22 +130,26 @@ def main():
     q_max = 5.0          # Max absolute inventory (BTC)
     lot_size = 0.01      # Lot size per execution (BTC)
     fixed_spread = 6.0   # Fixed spread for Naive ($6.00 ~ 0.85 bps)
-    gamma_static = 5e-6  # Static AS risk aversion (tuned for active market participation)
+    gamma_static = 5e-6  # Static AS risk aversion
     gamma_0 = 5e-6       # Advanced AS base risk aversion
     eta = 3.0            # Advanced AS non-linear penalty multiplier
     alpha = 2.0          # Quadratic penalty exponent
+    max_spread = 25.0    # Circuit Breaker / Spread Cap ($25.00 ~ 35 bps)
     T_horizon = 86400.0  # 24 hours in seconds
     
     # Baseline AS spread at q=0
     baseline_as_spread = (2.0 / gamma_static) * np.log(1.0 + gamma_static / k)
     print(f"  -> Baseline AS Spread (q=0): ${baseline_as_spread:.2f} vs Naive Fixed Spread: ${fixed_spread:.2f}")
+    print(f"  -> Circuit Breaker / Max Spread Cap: ${max_spread:.2f}")
     
     backtester = Backtester(
         merged_data=merged_with_vol,
         A=A,
         k=k,
         static_sigma=static_sigma,
-        rolling_sigma=rolling_sigma_arr,
+        rolling_sigma=ema_sigma_arr,
+        k_bids=k_bid_arr,
+        k_asks=k_ask_arr,
         T=T_horizon,
         lot_size=lot_size,
         q_max=q_max,
@@ -140,7 +163,7 @@ def main():
     strat_display_names = {
         "naive": "Naive Market Making",
         "static_as": "Avellaneda-Stoikov (Static sigma)",
-        "advanced_as": "Advanced AS (Adaptive gamma, Rolling sigma)"
+        "advanced_as": "Advanced AS (EMA sigma, Spread Cap, Asymmetric k)"
     }
     
     for s_key in strategies:
@@ -151,8 +174,11 @@ def main():
             gamma_static=gamma_static,
             gamma_0=gamma_0,
             eta=eta,
-            alpha=alpha
+            alpha=alpha,
+            max_spread=max_spread
         )
+        res["ema_sigmas"] = ema_sigma_arr
+        res["raw_sigmas"] = raw_sigma_arr
         hist_results[s_key] = res
         
         # Calculate key performance metrics
@@ -201,7 +227,12 @@ def main():
     p1 = plot_historical_comparison(hist_results, q_max=q_max, save_path=fig1_path)
     print(f"  -> Generated Figure 1: {p1}")
     
-    p2 = plot_advanced_as_deep_dive(hist_results["advanced_as"], q_max=q_max, save_path=fig2_path)
+    p2 = plot_advanced_as_deep_dive(
+        adv_data=hist_results["advanced_as"],
+        raw_sigmas=raw_sigma_arr,
+        q_max=q_max,
+        save_path=fig2_path
+    )
     print(f"  -> Generated Figure 2: {p2}")
     
     # ---------------------------------------------------------
@@ -225,6 +256,8 @@ def main():
         alpha=alpha,
         q_max=q_max,
         lot_size=lot_size,
+        max_spread=max_spread,
+        kappa=kappa,
         random_seed=42
     )
     

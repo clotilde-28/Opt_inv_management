@@ -7,7 +7,7 @@ Includes:
 """
 
 from abc import ABC, abstractmethod
-from typing import Tuple
+from typing import Tuple, Optional
 import numpy as np
 
 
@@ -127,8 +127,10 @@ class StaticASStrategy(BaseStrategy):
 class AdvancedASStrategy(BaseStrategy):
     """
     Advanced Avellaneda-Stoikov Strategy:
-    - Continuous rolling volatility sigma_t (adapts to volatility spikes/regimes)
+    - Continuous EMA volatility smoothing sigma_t (dampens microstructure noise, zero boundary jumps)
     - Adaptive non-linear risk aversion gamma(q) = gamma_0 * (1 + eta * (|q| / q_max)^alpha)
+    - Circuit Breaker / Spread Cap: prevents spread explosion during extreme volatility surges
+    - Asymmetric Liquidity (k_bid, k_ask): adjusts half-spreads to localized Order Flow Imbalance (OFI)
     - Dynamically widens spread in turbulent regimes to prevent adverse selection
     - Aggressively skews reservation price as inventory nears risk limits
     """
@@ -138,6 +140,7 @@ class AdvancedASStrategy(BaseStrategy):
         gamma_0: float = 5e-6,
         eta: float = 3.0,
         alpha: float = 2.0,
+        max_spread: float = 25.0,
         q_max: float = 5.0,
         lot_size: float = 0.01,
         min_half_spread: float = 0.01
@@ -146,6 +149,7 @@ class AdvancedASStrategy(BaseStrategy):
         self.gamma_0 = gamma_0
         self.eta = eta
         self.alpha = alpha
+        self.max_spread = max_spread
         self.min_half_spread = min_half_spread
 
     def get_adaptive_gamma(self, inventory: float) -> float:
@@ -161,22 +165,36 @@ class AdvancedASStrategy(BaseStrategy):
         inventory: float,
         tau: float,
         sigma: float,
-        k: float
+        k: float,
+        k_bid: Optional[float] = None,
+        k_ask: Optional[float] = None
     ) -> Tuple[float, float, float, float]:
         gamma_q = self.get_adaptive_gamma(inventory)
         var_tau = (sigma ** 2) * max(tau, 1.0)
         
-        # Dynamic spread
-        spread = gamma_q * var_tau + (2.0 / gamma_q) * np.log(1.0 + gamma_q / k)
+        kb = k_bid if k_bid is not None else k
+        ka = k_ask if k_ask is not None else k
         
-        # Reservation price skew with adaptive penalty
-        r = mid_price - inventory * gamma_q * var_tau
+        # Asymmetric base half-spreads from HJB first-order conditions
+        d_a_base = 0.5 * gamma_q * var_tau + (1.0 / gamma_q) * np.log(1.0 + gamma_q / ka)
+        d_b_base = 0.5 * gamma_q * var_tau + (1.0 / gamma_q) * np.log(1.0 + gamma_q / kb)
         
-        p_ask = r + spread / 2.0
-        p_bid = r - spread / 2.0
+        # Circuit Breaker / Spread Cap: cap the baseline spread during volatility spikes
+        raw_spread = d_a_base + d_b_base
+        if raw_spread > self.max_spread:
+            scale = self.max_spread / raw_spread
+            d_a_base *= scale
+            d_b_base *= scale
+            
+        # Inventory skewing from reservation price:
+        # Long inventory (q > 0) lowers ask (to sell) and lowers bid (avoid buying)
+        inv_skew = inventory * gamma_q * var_tau
+        delta_ask = max(d_a_base - inv_skew, self.min_half_spread)
+        delta_bid = max(d_b_base + inv_skew, self.min_half_spread)
         
-        delta_ask = max(p_ask - mid_price, self.min_half_spread)
-        delta_bid = max(mid_price - p_bid, self.min_half_spread)
+        # Cap individual quotes to avoid runaway distances
+        delta_ask = min(delta_ask, self.max_spread)
+        delta_bid = min(delta_bid, self.max_spread)
         
         p_ask = mid_price + delta_ask
         p_bid = mid_price - delta_bid

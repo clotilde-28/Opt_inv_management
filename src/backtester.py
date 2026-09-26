@@ -3,7 +3,7 @@ High-frequency event-driven backtesting engine for market making strategies.
 Simulates Poisson order matching calibrated to Tardis tick data with exact PnL accounting.
 """
 
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 import numpy as np
 import pandas as pd
 from numba import njit
@@ -16,6 +16,8 @@ def _run_backtest_kernel(
     rolling_sigmas: np.ndarray,
     uniform_random_a: np.ndarray,
     uniform_random_b: np.ndarray,
+    k_bids: np.ndarray,
+    k_asks: np.ndarray,
     A: float,
     k: float,
     strategy_type: int, # 0: Naive, 1: Static AS, 2: Advanced AS
@@ -25,6 +27,7 @@ def _run_backtest_kernel(
     gamma_0: float,
     eta: float,
     alpha: float,
+    max_spread: float,
     q_max: float,
     lot_size: float,
     T: float
@@ -34,7 +37,7 @@ def _run_backtest_kernel(
     strategy_type:
       0 = Naive (fixed spread, zero skew)
       1 = Static AS (static sigma, fixed gamma)
-      2 = Advanced AS (rolling sigma, adaptive gamma)
+      2 = Advanced AS (EMA sigma, adaptive gamma, spread cap, asymmetric k)
     """
     N = len(mid_prices)
     
@@ -62,6 +65,9 @@ def _run_backtest_kernel(
         cum_time += dt
         tau = max(T - cum_time, 1.0)
         
+        ka = k_asks[i]
+        kb = k_bids[i]
+        
         # --- Strategy Quote Calculations ---
         if strategy_type == 0:
             # Naive MM
@@ -70,6 +76,7 @@ def _run_backtest_kernel(
             p_bid = s - half_spread
             delta_a = half_spread
             delta_b = half_spread
+            spr = fixed_spread
             r = s
             
         elif strategy_type == 1:
@@ -84,22 +91,34 @@ def _run_backtest_kernel(
             p_bid = s - delta_b
             
         else:
-            # Advanced AS (Rolling Vol + Adaptive Gamma)
+            # Advanced AS (EMA Vol + Adaptive Gamma + Spread Cap + Asymmetric k)
             sig = rolling_sigmas[i]
             norm_q = min(abs(q) / q_max, 1.0)
             gamma_q = gamma_0 * (1.0 + eta * (norm_q ** alpha))
-            
             var_tau = (sig ** 2) * tau
-            spr = gamma_q * var_tau + (2.0 / gamma_q) * np.log(1.0 + gamma_q / k)
+            
+            # Asymmetric base half-spreads
+            d_a_base = 0.5 * gamma_q * var_tau + (1.0 / gamma_q) * np.log(1.0 + gamma_q / ka)
+            d_b_base = 0.5 * gamma_q * var_tau + (1.0 / gamma_q) * np.log(1.0 + gamma_q / kb)
+            raw_spr = d_a_base + d_b_base
+            
+            # Circuit Breaker / Spread Cap
+            if raw_spr > max_spread:
+                scale = max_spread / raw_spr
+                d_a_base *= scale
+                d_b_base *= scale
+                raw_spr = max_spread
+                
+            spr = raw_spr
             r = s - q * gamma_q * var_tau
-            delta_a = max(0.5 * spr - q * gamma_q * var_tau, 0.01)
-            delta_b = max(0.5 * spr + q * gamma_q * var_tau, 0.01)
+            delta_a = min(max(d_a_base - q * gamma_q * var_tau, 0.01), max_spread)
+            delta_b = min(max(d_b_base + q * gamma_q * var_tau, 0.01), max_spread)
             p_ask = s + delta_a
             p_bid = s - delta_b
 
-        # --- Fill Probabilities via Calibrated Poisson Intensity ---
-        prob_a = 1.0 - np.exp(-A * np.exp(-k * delta_a) * dt)
-        prob_b = 1.0 - np.exp(-A * np.exp(-k * delta_b) * dt)
+        # --- Fill Probabilities via Calibrated Poisson Intensity with Asymmetric k ---
+        prob_a = 1.0 - np.exp(-A * np.exp(-ka * delta_a) * dt)
+        prob_b = 1.0 - np.exp(-A * np.exp(-kb * delta_b) * dt)
         
         # Order Execution Checks
         # Ask fill: MM sells lot_size at p_ask
@@ -196,6 +215,8 @@ class Backtester:
         k: float,
         static_sigma: float,
         rolling_sigma: np.ndarray,
+        k_bids: Optional[np.ndarray] = None,
+        k_asks: Optional[np.ndarray] = None,
         T: float = 86400.0,
         lot_size: float = 0.01,
         q_max: float = 5.0,
@@ -216,6 +237,9 @@ class Backtester:
         self.dts = self.data["dt"].values.astype(np.float64)
         self.N = len(self.mid_prices)
         
+        self.k_bids = k_bids.astype(np.float64) if k_bids is not None else np.full(self.N, k, dtype=np.float64)
+        self.k_asks = k_asks.astype(np.float64) if k_asks is not None else np.full(self.N, k, dtype=np.float64)
+        
         # Paired random uniforms for identical order flow arrival across strategies
         np.random.seed(self.random_seed)
         self.uniform_random_a = np.random.uniform(0.0, 1.0, self.N)
@@ -225,10 +249,11 @@ class Backtester:
         self,
         strategy_type: str,
         fixed_spread: float = 6.0,
-        gamma_static: float = 1e-4,
-        gamma_0: float = 1e-4,
-        eta: float = 4.0,
-        alpha: float = 2.0
+        gamma_static: float = 5e-6,
+        gamma_0: float = 5e-6,
+        eta: float = 3.0,
+        alpha: float = 2.0,
+        max_spread: float = 25.0
     ) -> Dict[str, any]:
         """
         Run backtest for one of the three strategies: 'naive', 'static_as', 'advanced_as'.
@@ -256,6 +281,8 @@ class Backtester:
             rolling_sigmas=self.rolling_sigma,
             uniform_random_a=self.uniform_random_a,
             uniform_random_b=self.uniform_random_b,
+            k_bids=self.k_bids,
+            k_asks=self.k_asks,
             A=self.A,
             k=self.k,
             strategy_type=strat_id,
@@ -265,6 +292,7 @@ class Backtester:
             gamma_0=gamma_0,
             eta=eta,
             alpha=alpha,
+            max_spread=max_spread,
             q_max=self.q_max,
             lot_size=self.lot_size,
             T=self.T
