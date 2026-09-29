@@ -105,21 +105,24 @@ def main():
     # ---------------------------------------------------------
     # STEP 3: HISTORICAL BACKTESTING (3 STRATEGIES)
     # ---------------------------------------------------------
-    print("\n[Step 3/5] Executing High-Frequency Backtest on 1.89M trade ticks...")
+    print("\n[Step 3/5] Executing High-Frequency Backtest on 1.89M trade ticks with LOB realism...")
     t2 = time.time()
     
-    q_max = 5.0          # Max absolute inventory (BTC)
-    lot_size = 0.01      # Lot size per execution (BTC)
-    fixed_spread = 6.0   # Fixed spread for Naive ($6.00 ~ 0.85 bps)
-    gamma_static = 5e-6  # Static AS risk aversion (tuned for active market participation)
-    gamma_0 = 5e-6       # Advanced AS base risk aversion
-    eta = 3.0            # Advanced AS non-linear penalty multiplier
-    alpha = 2.0          # Quadratic penalty exponent
-    T_horizon = 86400.0  # 24 hours in seconds
+    q_max = 5.0             # Max absolute inventory (BTC)
+    lot_size = 0.01         # Lot size per execution (BTC)
+    fixed_spread = 6.0      # Fixed spread for Naive ($6.00 ~ 0.85 bps)
+    gamma_static = 3e-5     # Static AS risk aversion
+    gamma_0 = 3e-5          # Advanced AS base risk aversion
+    eta = 4.0               # Advanced AS non-linear penalty multiplier
+    alpha = 2.0             # Quadratic penalty exponent
+    T_horizon = 86400.0     # 24 hours in seconds
+    latency_ms = 50.0       # 50 ms network & wire latency
+    maker_fee = 0.00005     # 0.5 bps maker fee (institutional VIP maker tier)
     
     # Baseline AS spread at q=0
     baseline_as_spread = (2.0 / gamma_static) * np.log(1.0 + gamma_static / k)
     print(f"  -> Baseline AS Spread (q=0): ${baseline_as_spread:.2f} vs Naive Fixed Spread: ${fixed_spread:.2f}")
+    print(f"  -> Latency: {latency_ms:.1f}ms | Maker Fee: {maker_fee*10000:.1f} bps | Requote Threshold: $0.50")
     
     backtester = Backtester(
         merged_data=merged_with_vol,
@@ -130,6 +133,13 @@ def main():
         T=T_horizon,
         lot_size=lot_size,
         q_max=q_max,
+        latency_ms=latency_ms,
+        maker_fee=maker_fee,
+        cancel_rate=0.15,
+        requote_threshold=0.50,
+        hawkes_mu0=4.0,
+        hawkes_alpha=0.5,
+        hawkes_beta=1.2,
         random_seed=42
     )
     
@@ -158,32 +168,36 @@ def main():
         # Calculate key performance metrics
         pnl = res["total_pnl"]
         inv = res["inventory"]
-        dts = backtester.dts
+        timestamps = backtester.timestamps
         
         final_pnl = pnl[-1]
         final_inv = inv[-1]
         max_abs_inv = float(np.max(np.abs(inv)))
         inv_var = float(np.var(inv))
         max_dd = compute_max_drawdown(pnl)
-        sharpe = compute_sharpe_ratio(pnl, dts)
+        sharpe = compute_sharpe_ratio(pnl, timestamps, freq="5min", capital=100_000.0)
         tot_vol = res["total_volume"]
+        tot_fees = res["total_fees"]
+        maker_fills = res["maker_fills"]
         
         metrics_summary[strat_display_names[s_key]] = {
             "final_pnl": final_pnl,
+            "total_fees": tot_fees,
             "final_inventory": final_inv,
             "max_abs_inventory": max_abs_inv,
             "inventory_variance": inv_var,
             "max_drawdown": max_dd,
             "sharpe_ratio": sharpe,
-            "total_volume": tot_vol
+            "total_volume": tot_vol,
+            "maker_fills": maker_fills
         }
-        print(f"  -> [{strat_display_names[s_key]}] completed in {time.time()-st_start:.2f}s | Final PnL: ${final_pnl:,.2f} | Max|q|: {max_abs_inv:.2f} BTC | Var(q): {inv_var:.4f}")
+        print(f"  -> [{strat_display_names[s_key]}] completed in {time.time()-st_start:.2f}s | Final PnL: ${final_pnl:,.2f} | Fees: ${tot_fees:,.2f} | Fills: {maker_fills:,} | Max|q|: {max_abs_inv:.2f} BTC | Sharpe: {sharpe:.2f}")
         
     print(f"  All historical backtests completed in {time.time()-t2:.2f}s")
     
     # Generate and print performance summary table
     print("\n" + "=" * 80)
-    print("  HISTORICAL BACKTEST PERFORMANCE & RISK SUMMARY")
+    print("  HISTORICAL BACKTEST PERFORMANCE & RISK SUMMARY (REALISTIC LOB MATCHING)")
     print("=" * 80)
     perf_df = generate_performance_dataframe(metrics_summary)
     
@@ -207,7 +221,7 @@ def main():
     # ---------------------------------------------------------
     # STEP 5: MONTE CARLO SIMULATION ENGINE
     # ---------------------------------------------------------
-    print("\n[Step 5/5] Executing Monte Carlo Engine (M = 1,000 paths)...")
+    print("\n[Step 5/5] Executing Monte Carlo Engine with Adverse Selection (M = 1,000 paths)...")
     t3 = time.time()
     mc_engine = MonteCarloEngine(
         S0=S0,
@@ -216,8 +230,12 @@ def main():
         A=A,
         k=k,
         M=1000,
-        N=1800, # 1800 1-second steps (30 min trading horizon)
+        N=1800,  # 1800 1-second steps (30 min trading horizon)
         dt=1.0,
+        adverse_jump_prob=0.70,
+        adverse_jump_size=2.50,
+        adverse_drift_impact=0.04,
+        drift_decay_rate=0.25,
         fixed_spread=fixed_spread,
         gamma_static=gamma_static,
         gamma_0=gamma_0,
@@ -231,17 +249,21 @@ def main():
     mc_results = mc_engine.simulate()
     print(f"  -> Monte Carlo 1,000 paths completed in {time.time()-t3:.2f}s")
     
-    # Display Monte Carlo Tail Risk Metrics
+    # Display Monte Carlo Tail Risk & Moment Metrics
     print("\n  MONTE CARLO TERMINAL PnL RISK PROFILE (M = 1,000 paths):")
     mc_table_rows = []
     for s_name in ["Naive", "Static AS", "Advanced AS"]:
         st = mc_results[s_name]
+        sign_var = "+" if st['var_99'] > 0 else ""
+        sign_cvar = "+" if st['cvar_99'] > 0 else ""
         mc_table_rows.append({
             "Strategy": s_name,
             "Mean PnL ($)": f"${st['mean']:,.2f}",
             "Std Dev ($)": f"${st['std']:,.2f}",
-            "99% VaR ($)": f"${st['var_99']:,.2f}",
-            "99% CVaR ($)": f"${st['cvar_99']:,.2f}",
+            "Skewness": f"{st['skewness']:+.2f}",
+            "Kurtosis": f"{st['kurtosis']:+.2f}",
+            "99% VaR ($)": f"{sign_var}${st['var_99']:,.2f}",
+            "99% CVaR ($)": f"{sign_cvar}${st['cvar_99']:,.2f}",
         })
     mc_df = pd.DataFrame(mc_table_rows).set_index("Strategy")
     print(mc_df.to_markdown())

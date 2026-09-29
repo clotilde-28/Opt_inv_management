@@ -296,7 +296,7 @@ def plot_monte_carlo_distribution(
             label=f"{s_name} 99% CVaR (${cvar_val:.1f})"
         )
         
-    ax.set_title("Monte Carlo Terminal PnL Distribution: Progressive Variance Reduction (M = 1,000 Paths)")
+    ax.set_title("Monte Carlo Terminal PnL Distribution: Asymmetric Tail Risk Truncation (M = 1,000 Paths)")
     ax.set_xlabel("Terminal Mark-to-Market PnL ($)")
     ax.set_ylabel("Probability Density")
     ax.grid(True, linestyle="--", alpha=0.6)
@@ -304,15 +304,15 @@ def plot_monte_carlo_distribution(
     y_min, y_max = ax.get_ylim()
     ax.set_ylim(0, y_max * 1.18)
     
-    # Rigid, perfectly aligned table using ax.table
-    col_labels = ["Strategy", "Mean PnL", "Std Dev", "99% VaR", "99% CVaR"]
+    # Perfectly formatted risk profile table using ax.table
+    col_labels = ["Strategy", "Mean PnL", "Std Dev", "Skew", "Kurt", "99% VaR", "99% CVaR"]
     cell_text = []
     cell_colors = []
     
     row_bg_tints = {
-        "Naive": ["#FEE2E2"] * 5,
-        "Static AS": ["#E0F2FE"] * 5,
-        "Advanced AS": ["#CCFBF1"] * 5
+        "Naive": ["#FEE2E2"] * 7,
+        "Static AS": ["#E0F2FE"] * 7,
+        "Advanced AS": ["#CCFBF1"] * 7
     }
     
     for s_name in strats:
@@ -323,6 +323,8 @@ def plot_monte_carlo_distribution(
             s_name,
             f"${st['mean']:,.2f}",
             f"${st['std']:,.2f}",
+            f"{st.get('skewness', 0.0):+.2f}",
+            f"{st.get('kurtosis', 0.0):+.2f}",
             f"{sign_var}${st['var_99']:,.2f}",
             f"{sign_cvar}${st['cvar_99']:,.2f}"
         ])
@@ -332,13 +334,13 @@ def plot_monte_carlo_distribution(
         cellText=cell_text,
         colLabels=col_labels,
         cellColours=cell_colors,
-        colColours=["#E2E8F0"] * 5,
+        colColours=["#E2E8F0"] * 7,
         loc="upper left",
-        bbox=[0.02, 0.67, 0.40, 0.27],
+        bbox=[0.02, 0.65, 0.52, 0.28],
         zorder=10
     )
     the_table.auto_set_font_size(False)
-    the_table.set_fontsize(9.5)
+    the_table.set_fontsize(9.0)
     the_table.set_zorder(10)
     
     for (r, c), cell in the_table.get_celld().items():
