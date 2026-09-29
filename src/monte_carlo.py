@@ -37,12 +37,14 @@ def _run_mc_kernel_adverse_selection(
     alpha: float,
     q_max: float,
     lot_size: float,
-    ema_window_sec: float = 60.0
+    ema_window_sec: float = 60.0,
+    seed: int = 42
 ):
     """
     Numba-accelerated Monte Carlo simulation with micro-price adverse selection
     and correlated jump-diffusion dynamics across M paths and N time steps.
     """
+    np.random.seed(seed)
     T = N * dt
     pnl_naive = np.zeros(M)
     pnl_static = np.zeros(M)
@@ -210,7 +212,8 @@ class MonteCarloEngine:
         alpha: float = 2.0,
         q_max: float = 5.0,
         lot_size: float = 0.01,
-        random_seed: int = 42
+        seed: int = 42,
+        random_seed: Optional[int] = None
     ):
         self.S0 = S0
         self.mu = mu
@@ -231,13 +234,15 @@ class MonteCarloEngine:
         self.alpha = alpha
         self.q_max = q_max
         self.lot_size = lot_size
-        self.random_seed = random_seed
+        self.seed = seed if random_seed is None else random_seed
+        self.random_seed = self.seed
 
-    def simulate(self) -> Dict[str, any]:
+    def simulate(self, seed: Optional[int] = None) -> Dict[str, any]:
         """
         Execute Monte Carlo simulation across all M paths with adverse selection dynamics.
         """
-        np.random.seed(self.random_seed)
+        sim_seed = self.seed if seed is None else seed
+        np.random.seed(sim_seed)
         
         # Warm-up / compile Numba kernel
         _run_mc_kernel_adverse_selection(
@@ -249,10 +254,11 @@ class MonteCarloEngine:
             drift_decay_rate=self.drift_decay_rate,
             fixed_spread=self.fixed_spread,
             gamma_static=self.gamma_static, gamma_0=self.gamma_0,
-            eta=self.eta, alpha=self.alpha, q_max=self.q_max, lot_size=self.lot_size
+            eta=self.eta, alpha=self.alpha, q_max=self.q_max, lot_size=self.lot_size,
+            seed=sim_seed
         )
         
-        # Full simulation
+        # Full simulation with deterministic seed
         pnl_n, pnl_s, pnl_a = _run_mc_kernel_adverse_selection(
             M=self.M, N=self.N, dt=self.dt, S0=self.S0, mu_base=self.mu, sigma=self.sigma,
             A=self.A, k=self.k,
@@ -262,7 +268,8 @@ class MonteCarloEngine:
             drift_decay_rate=self.drift_decay_rate,
             fixed_spread=self.fixed_spread,
             gamma_static=self.gamma_static, gamma_0=self.gamma_0,
-            eta=self.eta, alpha=self.alpha, q_max=self.q_max, lot_size=self.lot_size
+            eta=self.eta, alpha=self.alpha, q_max=self.q_max, lot_size=self.lot_size,
+            seed=sim_seed
         )
         
         # Calculate full statistical and tail risk metrics

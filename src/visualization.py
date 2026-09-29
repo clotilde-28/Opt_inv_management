@@ -13,6 +13,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
+from src.metrics import compute_var_cvar
 
 # Configure publication aesthetics
 plt.rcParams.update({
@@ -275,6 +276,10 @@ def plot_monte_carlo_distribution(
         pnl = mc_results[s_name]["pnl"]
         c = colors[s_name]
         
+        # Dynamically compute metrics from simulated terminal PnL array
+        std_val = float(np.std(pnl, ddof=1))
+        _, cvar_val = compute_var_cvar(pnl, alpha=0.99)
+        
         # Seaborn KDE with alpha=0.4 fill
         sns.kdeplot(
             pnl,
@@ -283,18 +288,19 @@ def plot_monte_carlo_distribution(
             fill=True,
             alpha=0.4,
             linewidth=2.2,
-            label=f"{s_name} (Std: ${mc_results[s_name]['std']:.1f})"
+            label=f"{s_name} (Std: ${std_val:.2f})"
         )
         
         # 99% CVaR vertical dashed line
-        cvar_val = mc_results[s_name]["cvar_99"]
+        cvar_sign = "-" if cvar_val < 0 else ""
+        cvar_str = f"{cvar_sign}${abs(cvar_val):.2f}"
         ax.axvline(
             cvar_val,
             color=c,
             linestyle="--",
             linewidth=2.0,
             alpha=0.95,
-            label=f"{s_name} 99% CVaR (${cvar_val:.1f})"
+            label=f"{s_name} 99% CVaR ({cvar_str})"
         )
         
     ax.set_title("Monte Carlo Terminal PnL Distribution: Asymmetric Tail Risk Truncation (M = 1,000 Paths)")

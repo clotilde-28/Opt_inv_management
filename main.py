@@ -39,6 +39,8 @@ from src.visualization import (
     plot_monte_carlo_distribution
 )
 
+RANDOM_SEED = 42
+
 
 def main():
     print("=" * 80)
@@ -243,10 +245,10 @@ def main():
         alpha=alpha,
         q_max=q_max,
         lot_size=lot_size,
-        random_seed=42
+        seed=RANDOM_SEED
     )
     
-    mc_results = mc_engine.simulate()
+    mc_results = mc_engine.simulate(seed=RANDOM_SEED)
     print(f"  -> Monte Carlo 1,000 paths completed in {time.time()-t3:.2f}s")
     
     # Display Monte Carlo Tail Risk & Moment Metrics
