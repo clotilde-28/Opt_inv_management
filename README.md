@@ -36,26 +36,6 @@ Opt_inv_management/
 └── README.md                                          # Quantitative documentation
 ```
 
-### 1.2 Problem Formulation & Theoretical Framework
-
-A high-frequency market maker earns the bid-ask spread by quoting limit orders on both sides of the book. However, holding unhedged positions exposes the dealer to **inventory risk** (adverse price drift while holding inventory).
-
-#### Asset Dynamics & Order Execution
-The reference mid-price follows an arithmetic Brownian motion on a filtered probability space:
-$$dS_t = \sigma dW_t$$
-
-Limit order fill rates follow Poisson point processes with intensities decaying exponentially with the quote distance $\delta$ from the mid-price:
-$$\lambda^a(\delta_t^a) = A e^{-k \delta_t^a}, \quad \lambda^b(\delta_t^b) = A e^{-k \delta_t^b}$$
-where $A$ is the baseline arrival rate, $k$ is the liquidity density, and $\delta^a, \delta^b$ are the distances of the ask and bid quotes from the mid-price.
-
-#### Stochastic Optimal Control (HJB Formulation)
-With cash $X_t$ and inventory $q_t$, the terminal wealth at horizon $T$ is $\Pi_T = X_T + q_T S_T$. Assuming Constant Absolute Risk Aversion (CARA) with risk coefficient $\gamma > 0$, the value function solves:
-$$\max_{(\delta_t^a, \delta_t^b)} \mathbb{E} \left[ -e^{-\gamma (X_T + q_T S_T)} \right]$$
-
-Applying dynamic programming yields the Hamilton-Jacobi-Bellman (HJB) equation:
-$$\partial_t V + \frac{1}{2}\sigma^2 \partial_{ss} V + \max_{\delta^a \ge 0} \{ \lambda^a(\delta^a)[V(x + s + \delta^a, q - 1, s, t) - V] \} + \max_{\delta^b \ge 0} \{ \lambda^b(\delta^b)[V(x - s + \delta^b, q + 1, s, t) - V] \} = 0$$
-subject to $V(x, q, s, T) = -\exp(-\gamma(x + qs))$.
-
 ---
 
 ## 2. Microstructural Realism & Matching Engine
@@ -96,14 +76,37 @@ Market makers cannot execute instantly at the touch. Limit orders must wait in l
 
 ## 3. Mathematical Framework & Metric Clarifications
 
-### 3.1 Clarification: Asymmetric Tail-Risk Truncation vs "Variance Reduction"
+### 3.1 Problem Formulation & Theoretical Framework (HJB)
+
+A high-frequency market maker earns the bid-ask spread by quoting limit orders on both sides of the book. However, holding unhedged positions exposes the dealer to **inventory risk** (adverse price drift while holding inventory).
+
+#### Asset Dynamics & Order Execution
+The reference mid-price follows an arithmetic Brownian motion on a filtered probability space:
+$$dS_t = \sigma dW_t$$
+
+Limit order fill rates follow Poisson point processes with intensities decaying exponentially with the quote distance $\delta$ from the mid-price:
+$$\lambda^a(\delta_t^a) = A e^{-k \delta_t^a}, \quad \lambda^b(\delta_t^b) = A e^{-k \delta_t^b}$$
+where $A$ is the baseline arrival rate, $k$ is the liquidity density, and $\delta^a, \delta^b$ are the distances of the ask and bid quotes from the mid-price.
+
+#### Stochastic Optimal Control (HJB Formulation)
+With cash $X_t$ and inventory $q_t$, the terminal wealth at horizon $T$ is $\Pi_T = X_T + q_T S_T$. Assuming Constant Absolute Risk Aversion (CARA) with risk coefficient $\gamma > 0$, the value function solves:
+$$\max_{(\delta_t^a, \delta_t^b)} \mathbb{E} \left[ -e^{-\gamma (X_T + q_T S_T)} \right]$$
+
+Applying dynamic programming yields the Hamilton-Jacobi-Bellman (HJB) equation:
+$$\partial_t V + \frac{1}{2}\sigma^2 \partial_{ss} V + \max_{\delta^a \ge 0} \{ \lambda^a(\delta^a)[V(x + s + \delta^a, q - 1, s, t) - V] \} + \max_{\delta^b \ge 0} \{ \lambda^b(\delta^b)[V(x - s + \delta^b, q + 1, s, t) - V] \} = 0$$
+subject to $V(x, q, s, T) = -\exp(-\gamma(x + qs))$.
+
+### 3.2 Clarification: Asymmetric Tail-Risk Truncation vs "Variance Reduction"
 The Avellaneda-Stoikov (AS) model does **not** collapse global PnL standard deviation to zero. In fact, active spread adjustment and quote skewing maintain global variance roughly constant (or slightly higher). 
 The core mathematical value of the AS model is **asymmetric tail-risk truncation**:
 - Shifting mean PnL into positive territory by capturing spread on both sides.
 - Truncating catastrophic left-tail drawdowns and fat-tail losses (slashing 99% CVaR / Expected Shortfall).
 - Reducing negative skewness.
 
-### 3.2 Avellaneda-Stoikov Pricing Equations
+### 3.3 Avellaneda-Stoikov Pricing Equations
+
+The practical Avellaneda-Stoikov pricing equations are directly derived via an asymptotic approximation of the Hamilton-Jacobi-Bellman (HJB) value function defined above (assuming small risk aversion $\gamma$). This elegantly translates the continuous-time stochastic optimal control problem into actionable, real-time bid-ask quotes.
+
 Under arithmetic Brownian motion $dS_t = \sigma dW_t$:
 - **Reservation Price**:
   $$r(s, q, t) = s_t - q_t \gamma \sigma^2 (T - t)$$
@@ -113,13 +116,13 @@ Under arithmetic Brownian motion $dS_t = \sigma dW_t$:
   $$p_t^a = r_t + \frac{\delta_t}{2}, \quad p_t^b = r_t - \frac{\delta_t}{2}$$
 When long ($q_t > 0$), $r_t < s_t$, posting the ask closer to mid to incentivize selling while moving the bid deeper into the book to avoid accumulating toxic inventory.
 
-### 3.3 Advanced Adaptive Strategy
+### 3.4 Advanced Adaptive Strategy
 1. **Continuous Rolling Volatility ($\sigma_t$)**: Real-time 5-minute rolling window tracking empirical dispersion:
    $$\sigma_t = \sqrt{\frac{1}{W} \sum_{i=0}^{W-1} (S_{t-i} - S_{t-i-1})^2}$$
 2. **Non-Linear Adaptive Penalty $\gamma(q_t)$**:
    $$\gamma(q_t) = \gamma_0 \left(1 + \eta \left(\frac{|q_t|}{q_{\max}}\right)^\alpha\right), \quad \alpha = 2.0, \; \eta = 4.0$$
 
-### 3.4 Binned Sharpe Ratio Formulation
+### 3.5 Binned Sharpe Ratio Formulation
 Tick-by-tick return variance collapses the denominator due to microsecond autocorrelation, falsely producing Sharpe ratios > 600.
 We compute returns sampled on **discrete 5-minute bins** ($288$ periods/day) over capital $C = \$100,000$, subtracting an annualized 4% risk-free rate:
 $$\text{Sharpe} = \frac{\mathbb{E}[R_{5\text{m}}] - \frac{r_f}{288 \times 365}}{\text{Std}(R_{5\text{m}})} \times \sqrt{288 \times 365}$$

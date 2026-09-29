@@ -258,7 +258,6 @@ def plot_monte_carlo_distribution(
     - Kernel Density Estimation (KDE) plot showing distribution of Terminal PnL for Naive, AS Static, Advanced AS.
     - Distinct colors and alpha=0.4 fill area.
     - 99% Conditional VaR (CVaR) vertical lines for the three strategies.
-    - Comprehensive textbox table summarizing Mean PnL, Std Dev, 99% VaR, 99% CVaR.
     """
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     
@@ -287,12 +286,10 @@ def plot_monte_carlo_distribution(
             label=f"{s_name} (Std: ${mc_results[s_name]['std']:.1f})"
         )
         
-        # 99% CVaR vertical dashed line up to table boundary
+        # 99% CVaR vertical dashed line
         cvar_val = mc_results[s_name]["cvar_99"]
         ax.axvline(
             cvar_val,
-            ymin=0.0,
-            ymax=0.62,
             color=c,
             linestyle="--",
             linewidth=2.0,
@@ -306,55 +303,7 @@ def plot_monte_carlo_distribution(
     ax.grid(True, linestyle="--", alpha=0.6)
     ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: f"${x:,.0f}"))
     y_min, y_max = ax.get_ylim()
-    ax.set_ylim(0, y_max * 1.18)
-    
-    # Perfectly formatted risk profile table using ax.table (with Kurtosis column removed and width resized)
-    col_labels = ["Strategy", "Mean PnL", "Std Dev", "Skew", "99% VaR", "99% CVaR"]
-    cell_text = []
-    cell_colors = []
-    
-    row_bg_tints = {
-        "Naive": ["#FEE2E2"] * 6,
-        "Static AS": ["#E0F2FE"] * 6,
-        "Advanced AS": ["#CCFBF1"] * 6
-    }
-    
-    for s_name in strats:
-        st = mc_results[s_name]
-        sign_var = "+" if st['var_99'] > 0 else ""
-        sign_cvar = "+" if st['cvar_99'] > 0 else ""
-        cell_text.append([
-            s_name,
-            f"${st['mean']:,.2f}",
-            f"${st['std']:,.2f}",
-            f"{st.get('skewness', 0.0):+.2f}",
-            f"{sign_var}${st['var_99']:,.2f}",
-            f"{sign_cvar}${st['cvar_99']:,.2f}"
-        ])
-        cell_colors.append(row_bg_tints[s_name])
-        
-    the_table = ax.table(
-        cellText=cell_text,
-        colLabels=col_labels,
-        cellColours=cell_colors,
-        colColours=["#E2E8F0"] * 6,
-        loc="upper left",
-        bbox=[0.02, 0.66, 0.43, 0.26],
-        zorder=10
-    )
-    the_table.auto_set_font_size(False)
-    the_table.set_fontsize(9.0)
-    the_table.set_zorder(10)
-    
-    for (r, c), cell in the_table.get_celld().items():
-        cell.set_edgecolor("#94A3B8")
-        cell.set_linewidth(1.0)
-        cell.set_alpha(1.0)
-        cell.set_zorder(10)
-        if r == 0:
-            cell.set_text_props(weight="bold", color="#0F172A")
-        else:
-            cell.set_text_props(color="#1E293B")
+    ax.set_ylim(0, y_max * 1.15)
     
     ax.legend(loc="upper right", frameon=True, facecolor="#F8FAFC", edgecolor="#CBD5E1", fontsize=9.5)
     
