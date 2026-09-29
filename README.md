@@ -11,6 +11,8 @@ This repository evaluates the efficacy of optimal inventory control in high-freq
 2. **Avellaneda-Stoikov (Static $\sigma$)**: Static session volatility $\sigma_0$ with reservation price skewed linearly by inventory $q_t$.
 3. **Advanced Avellaneda-Stoikov**: Dynamic rolling volatility $\sigma_t$ (5-minute rolling window) and non-linear adaptive risk aversion $\gamma(q_t)$, featuring quadratic penalty scaling as inventory approaches hard risk limits.
 
+Specifically, the repository systematically compares the three paradigms to isolate the impact of dynamic spread widening and asymmetric quote skewing on capital preservation.
+
 ### Directory Structure
 ```
 Opt_inv_management/
@@ -34,6 +36,26 @@ Opt_inv_management/
 └── README.md                                          # Quantitative documentation
 ```
 
+### 1.2 Problem Formulation & Theoretical Framework
+
+A high-frequency market maker earns the bid-ask spread by quoting limit orders on both sides of the book. However, holding unhedged positions exposes the dealer to **inventory risk** (adverse price drift while holding inventory).
+
+#### Asset Dynamics & Order Execution
+The reference mid-price follows an arithmetic Brownian motion on a filtered probability space:
+$$dS_t = \sigma dW_t$$
+
+Limit order fill rates follow Poisson point processes with intensities decaying exponentially with the quote distance $\delta$ from the mid-price:
+$$\lambda^a(\delta_t^a) = A e^{-k \delta_t^a}, \quad \lambda^b(\delta_t^b) = A e^{-k \delta_t^b}$$
+where $A$ is the baseline arrival rate, $k$ is the liquidity density, and $\delta^a, \delta^b$ are the distances of the ask and bid quotes from the mid-price.
+
+#### Stochastic Optimal Control (HJB Formulation)
+With cash $X_t$ and inventory $q_t$, the terminal wealth at horizon $T$ is $\Pi_T = X_T + q_T S_T$. Assuming Constant Absolute Risk Aversion (CARA) with risk coefficient $\gamma > 0$, the value function solves:
+$$\max_{(\delta_t^a, \delta_t^b)} \mathbb{E} \left[ -e^{-\gamma (X_T + q_T S_T)} \right]$$
+
+Applying dynamic programming yields the Hamilton-Jacobi-Bellman (HJB) equation:
+$$\partial_t V + \frac{1}{2}\sigma^2 \partial_{ss} V + \max_{\delta^a \ge 0} \{ \lambda^a(\delta^a)[V(x + s + \delta^a, q - 1, s, t) - V] \} + \max_{\delta^b \ge 0} \{ \lambda^b(\delta^b)[V(x - s + \delta^b, q + 1, s, t) - V] \} = 0$$
+subject to $V(x, q, s, T) = -\exp(-\gamma(x + qs))$.
+
 ---
 
 ## 2. Microstructural Realism & Matching Engine
@@ -53,7 +75,7 @@ Market makers cannot execute instantly at the touch. Limit orders must wait in l
 - **Execution Condition**: An order can only fill after $Q_{\text{ahead}} \le 0$.
 
 ### 2.2 Network & Processing Latency (`latency_ms` = 50.0 ms)
-- **Market Data Feed Latency**: At time $t$, the strategy observes delayed market prices and volatility from $t_{\text{obs}} = t - \text{latency\_ms}$.
+- **Market Data Feed Latency**: At time $t$, the strategy observes delayed market prices and volatility from $t_{\text{obs}} = t - \text{latency ms}$.
 - **Order Wire Delay**: Quotes placed or cancelled at time $t$ require `latency_ms` transit before activating at the exchange matching engine.
 - Stale quotes remain exposed at the exchange during rapid price swings, introducing real-world latency-induced adverse selection.
 
@@ -67,7 +89,7 @@ Market makers cannot execute instantly at the touch. Limit orders must wait in l
 
 ### 2.4 Strict Maker Fee Accounting
 - Passive limit order executions incur maker fees deducted directly from cash:
-  $$\text{Fee} = p_{\text{fill}} \cdot \text{lot\_size} \cdot \text{maker\_fee}$$
+  $$\text{Fee} = p_{\text{fill}} \cdot \text{lot size} \cdot \text{maker fee}$$
 - Calibrated at **0.5 bps** ($0.00005$, institutional VIP maker tier).
 
 ---
@@ -145,11 +167,11 @@ Rather than assuming standard Geometric Brownian Motion where passive fills are 
 - Drift relaxes toward fundamental drift $\mu$ with decay rate $\beta_{\text{decay}} = 0.25/\text{s}$.
 
 ### Terminal PnL Distribution & Tail Risk Profile:
-| Strategy | Mean PnL ($) | Std Dev ($) | Skewness | 99% VaR ($) | 99% CVaR ($) |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **Naive Market Making** | \$47.23 | \$40.69 | +0.14 | -\$53.97 | -\$79.54 |
-| **Avellaneda-Stoikov (Static $\sigma$)** | \$46.84 | \$26.37 | +0.18 | **-\$16.90** | **-\$41.76** |
-| **Advanced AS (Adaptive $\gamma$, Rolling $\sigma$)** | **\$46.53** | \$24.96 | +0.18 | **-\$8.32** | **-\$33.69** |
+| Strategy | Mean PnL ($) | Std Dev ($) | 99% VaR ($) | 99% CVaR ($) |
+| :--- | :---: | :---: | :---: | :---: |
+| **Naive Market Making** | \$47.23 | \$40.69 | -\$53.97 | -\$79.54 |
+| **Avellaneda-Stoikov (Static $\sigma$)** | \$46.84 | \$26.37 | **-\$16.90** | **-\$41.76** |
+| **Advanced AS (Adaptive $\gamma$, Rolling $\sigma$)** | **\$46.53** | \$24.96 | **-\$8.32** | **-\$33.69** |
 
 ### 5.1 Monte Carlo Risk Profile Chart
 ![Monte Carlo Terminal PnL Distribution](figures/monte_carlo_pnl_distribution.jpg)
