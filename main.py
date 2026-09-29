@@ -112,7 +112,7 @@ def main():
     
     q_max = 5.0             # Max absolute inventory (BTC)
     lot_size = 0.01         # Lot size per execution (BTC)
-    fixed_spread = 6.0      # Fixed spread for Naive ($6.00 ~ 0.85 bps)
+    fixed_spread = 18.0      # Fixed spread for Naive ($6.00 ~ 0.85 bps)
     gamma_static = 3e-5     # Static AS risk aversion
     gamma_0 = 3e-5          # Advanced AS base risk aversion
     eta = 4.0               # Advanced AS non-linear penalty multiplier
