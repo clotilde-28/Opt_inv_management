@@ -131,7 +131,7 @@ Across the 24-hour horizon, BTC/USDT fell by **-\$1,630.20 (-2.29%)** with sever
 
 | Strategy | Final Total PnL ($) | Total Fees Paid ($) | Final Inventory ($q_T$) | Max \|Inventory\| ($\max \|q_t\|$) | Inventory Variance ($\text{Var}(q)$) | Max Drawdown ($) | Annualized Sharpe Ratio | Total Volume Traded (BTC) | Maker Fills |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Naive Market Making** | -\$9,933.22 | \$822.74 | +3.130 | 5.010 | 2.6345 | \$15,068.34 | -34.69 | 236.99 | 23,699 |
+| **Naive Market Making** | -\$695.16 | \$111.29 | +4.620 | 5.010 | 2.4052 | \$9,684.19 | -2.17 | 32.06 | 3,206 |
 | **Avellaneda-Stoikov (Static $\sigma$)** | -\$116.43 | \$37.12 | +0.640 | 0.960 | **0.0112** | **\$233.20** | -17.56 | 10.66 | 1,066 |
 | **Advanced AS (Adaptive $\gamma$, Rolling $\sigma$)** | **+\$152.54** | \$85.63 | -0.580 | 1.830 | **0.0525** | **\$299.32** | **+8.16** | 24.60 | 2,460 |
 
@@ -141,7 +141,7 @@ Across the 24-hour horizon, BTC/USDT fell by **-\$1,630.20 (-2.29%)** with sever
 
 ### 4.2 Key Historical Takeaways
 1. **Elimination of Frictionless Illusions**:
-   - In frictionless backtests, Naive MM showed false profits. Under realistic LOB queueing, 50ms latency, and maker fees, Naive MM gets crushed (**-\$9,933.22**, Max Drawdown **\$15,068.34**), repeatedly buying into the downward price cascade and getting pegged at the +5 BTC hard inventory limit.
+   - In frictionless backtests, Naive MM showed false profits. Under realistic LOB queueing, 50ms latency, and maker fees, Naive MM gets crushed (**-\$695.16**, Max Drawdown **\$9,684.19**), repeatedly buying into the downward price cascade and getting pegged at the +5 BTC hard inventory limit.
 2. **Capital Preservation through Skewing**:
    - Both Avellaneda-Stoikov variants protect capital during the \$1,630 market drop. Static AS limits drawdown to \$233.20.
 3. **Alpha Generation via Adaptive Volatility**:
@@ -168,21 +168,21 @@ Rather than assuming standard Geometric Brownian Motion where passive fills are 
 ### Terminal PnL Distribution & Tail Risk Profile:
 | Strategy | Mean PnL ($) | Std Dev ($) | 99% VaR ($) | 99% CVaR ($) |
 | :--- | :---: | :---: | :---: | :---: |
-| **Naive Market Making** | \$42.94 | \$50.93 | -\$117.76 | -\$169.21 |
+| **Naive Market Making** | \$23.48 | \$25.53 | -\$53.96 | -\$80.48 |
 | **Avellaneda-Stoikov (Static $\sigma$)** | \$44.77 | \$29.43 | **-\$32.91** | **-\$59.69** |
 | **Advanced AS (Adaptive $\gamma$, Rolling $\sigma$)** | **\$44.91** | \$27.64 | **-\$27.69** | **-\$51.01** |
 
 ### 5.1 Monte Carlo Risk Profile Chart
 ![Monte Carlo Terminal PnL Distribution](figures/monte_carlo_pnl_distribution.jpg)
-*Figure 3: Terminal PnL distributions ($M = 1,000$ paths) under micro-price jump-diffusion and adverse selection. The Kernel Density Estimation (KDE) curves highlight how Avellaneda-Stoikov strategies truncate the catastrophic left tail (cutting 99% CVaR from -$79.54 to -$33.69 for Advanced AS). Global standard deviation remains stable around ~$25-$26, demonstrating that AS operates via asymmetric tail-risk truncation rather than global variance elimination.*
+*Figure 3: Terminal PnL distributions ($M = 1,000$ paths) under micro-price jump-diffusion and adverse selection. The Kernel Density Estimation (KDE) curves highlight how Avellaneda-Stoikov strategies truncate the catastrophic left tail (cutting 99% CVaR from -$80.48 to -$51.01 for Advanced AS). Global standard deviation remains stable around ~$25-$29, demonstrating that AS operates via asymmetric tail-risk truncation rather than global variance elimination.*
 
 ### 5.2 Tail Risk Insights
 1. **Asymmetric Tail-Risk Truncation**:
-   - Naive MM experiences heavy adverse selection losses in the left tail (99% CVaR / Expected Shortfall of **-\$169.21**).
-   - Advanced AS truncates this tail risk significantly (99% CVaR of **-\$51.01**), cutting tail losses by **69.85%**.
+   - Naive MM experiences heavy adverse selection losses in the left tail (99% CVaR / Expected Shortfall of **-\$80.48**).
+   - Advanced AS truncates this tail risk significantly (99% CVaR of **-\$51.01**), cutting tail losses by **36.62%**.
 2. **Return Enhancement with Lower Downside Risk**:
-   - Advanced AS achieves a 99% VaR of just **-$27.69**, compared to **-$117.76** for Naive MM. 
-   - Furthermore, the adaptive strategy not only truncates downside risk but slightly improves expected profitability (Mean PnL of **$44.91** vs **$42.94** for Naive MM), proving exceptional risk-adjusted capital efficiency.
+   - Advanced AS achieves a 99% VaR of just **-$27.69**, compared to **-$53.96** for Naive MM. 
+   - Furthermore, the adaptive strategy not only truncates downside risk but slightly improves expected profitability (Mean PnL of **$44.91** vs **$23.48** for Naive MM), proving exceptional risk-adjusted capital efficiency.
 
 ---
 
