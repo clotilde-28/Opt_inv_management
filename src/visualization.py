@@ -145,7 +145,9 @@ def plot_historical_comparison(
     
     plt.tight_layout()
     plt.subplots_adjust(top=0.94)
-    plt.savefig(save_path, dpi=300)
+    base_root, _ = os.path.splitext(save_path)
+    plt.savefig(f"{base_root}.png", dpi=300)
+    plt.savefig(f"{base_root}.jpg", dpi=300)
     plt.close()
     return save_path
 
@@ -240,7 +242,9 @@ def plot_advanced_as_deep_dive(
     
     plt.tight_layout()
     plt.subplots_adjust(top=0.94)
-    plt.savefig(save_path, dpi=300)
+    base_root, _ = os.path.splitext(save_path)
+    plt.savefig(f"{base_root}.png", dpi=300)
+    plt.savefig(f"{base_root}.jpg", dpi=300)
     plt.close()
     return save_path
 
@@ -304,15 +308,15 @@ def plot_monte_carlo_distribution(
     y_min, y_max = ax.get_ylim()
     ax.set_ylim(0, y_max * 1.18)
     
-    # Perfectly formatted risk profile table using ax.table
-    col_labels = ["Strategy", "Mean PnL", "Std Dev", "Skew", "Kurt", "99% VaR", "99% CVaR"]
+    # Perfectly formatted risk profile table using ax.table (with Kurtosis column removed and width resized)
+    col_labels = ["Strategy", "Mean PnL", "Std Dev", "Skew", "99% VaR", "99% CVaR"]
     cell_text = []
     cell_colors = []
     
     row_bg_tints = {
-        "Naive": ["#FEE2E2"] * 7,
-        "Static AS": ["#E0F2FE"] * 7,
-        "Advanced AS": ["#CCFBF1"] * 7
+        "Naive": ["#FEE2E2"] * 6,
+        "Static AS": ["#E0F2FE"] * 6,
+        "Advanced AS": ["#CCFBF1"] * 6
     }
     
     for s_name in strats:
@@ -324,7 +328,6 @@ def plot_monte_carlo_distribution(
             f"${st['mean']:,.2f}",
             f"${st['std']:,.2f}",
             f"{st.get('skewness', 0.0):+.2f}",
-            f"{st.get('kurtosis', 0.0):+.2f}",
             f"{sign_var}${st['var_99']:,.2f}",
             f"{sign_cvar}${st['cvar_99']:,.2f}"
         ])
@@ -334,9 +337,9 @@ def plot_monte_carlo_distribution(
         cellText=cell_text,
         colLabels=col_labels,
         cellColours=cell_colors,
-        colColours=["#E2E8F0"] * 7,
+        colColours=["#E2E8F0"] * 6,
         loc="upper left",
-        bbox=[0.02, 0.65, 0.52, 0.28],
+        bbox=[0.02, 0.66, 0.43, 0.26],
         zorder=10
     )
     the_table.auto_set_font_size(False)
@@ -356,6 +359,8 @@ def plot_monte_carlo_distribution(
     ax.legend(loc="upper right", frameon=True, facecolor="#F8FAFC", edgecolor="#CBD5E1", fontsize=9.5)
     
     plt.tight_layout()
-    plt.savefig(save_path, dpi=300)
+    base_root, _ = os.path.splitext(save_path)
+    plt.savefig(f"{base_root}.png", dpi=300)
+    plt.savefig(f"{base_root}.jpg", dpi=300)
     plt.close()
     return save_path

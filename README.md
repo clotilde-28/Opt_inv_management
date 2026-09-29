@@ -18,9 +18,9 @@ Opt_inv_management/
 │   ├── binance_book_ticker_2024-04-01_BTCUSDT.csv.gz  # Top-of-book L1 state (~5.62M rows)
 │   └── binance_trades_2024-04-01_BTCUSDT.csv.gz       # Executed market orders (~1.89M rows)
 ├── figures/
-│   ├── historical_3way_comparison.png                 # Figure 1: 3-way 24h backtest with LOB realism
-│   ├── advanced_as_deep_dive.png                      # Figure 2: Dynamic quotes & PnL decomposition
-│   └── monte_carlo_pnl_distribution.png               # Figure 3: Terminal PnL KDE, 99% CVaR & Tail Risk
+│   ├── historical_3way_comparison.jpg                 # Figure 1: 3-way 24h backtest with LOB realism
+│   ├── advanced_as_deep_dive.jpg                      # Figure 2: Dynamic quotes & PnL decomposition
+│   └── monte_carlo_pnl_distribution.jpg               # Figure 3: Terminal PnL KDE, 99% CVaR & Tail Risk
 ├── src/
 │   ├── __init__.py
 │   ├── data_loader.py                                 # Causal merge_asof parser
@@ -28,7 +28,7 @@ Opt_inv_management/
 │   ├── strategy.py                                    # MM Strategy implementations
 │   ├── backtester.py                                  # Modular MatchingEngine & Numba-accelerated LOB simulator
 │   ├── monte_carlo.py                                 # 1,000-path Jump-Diffusion & Adverse Selection Engine
-│   ├── metrics.py                                     # Skewness, Kurtosis, 99% VaR, 99% CVaR & binned Sharpe
+│   ├── metrics.py                                     # Skewness, 99% VaR, 99% CVaR & binned Sharpe
 │   └── visualization.py                               # Publication-quality figure generation
 ├── main.py                                            # Master pipeline orchestrator
 └── README.md                                          # Quantitative documentation
@@ -43,18 +43,18 @@ Real-world high-frequency market making does not take place in a frictionless, i
 ### 2.1 Limit Order Book Queue Position Estimation
 Market makers cannot execute instantly at the touch. Limit orders must wait in line:
 - **Queue Placement**: When a limit order is placed at price $p$:
-  - If $p = p_{\text{touch}}$, the order is assigned behind the visible L1 volume: $Q_{\text{ahead}} = \text{volume}_{\text{L1}}$.
+  - If $p = p_{\text{touch}}$, the order is assigned behind the visible L1 volume: $Q_{\text{ahead}} = V_{\text{L1}}$.
   - If $p$ improves the touch, $Q_{\text{ahead}} = 0$ (front of the book).
-  - If $p$ is behind the touch, $Q_{\text{ahead}} = \text{volume}_{\text{L1}} + \rho_{\text{depth}} \cdot |p - p_{\text{touch}}|$.
+  - If $p$ is behind the touch, $Q_{\text{ahead}} = V_{\text{L1}} + \rho_{\text{depth}} \cdot |p - p_{\text{touch}}|$.
 - **Queue Consumption**: Aggressive incoming market orders consume queue volume ahead:
   $$Q_{\text{ahead}} \leftarrow \max(0, Q_{\text{ahead}} - V_{\text{trade}})$$
 - **Stochastic Cancellations**: Unfilled competing orders ahead in the queue cancel over time:
   $$Q_{\text{ahead}}(t + \Delta t) = Q_{\text{ahead}}(t) \cdot \exp(-\lambda_{\text{cancel}} \Delta t)$$
 - **Execution Condition**: An order can only fill after $Q_{\text{ahead}} \le 0$.
 
-### 2.2 Network & Processing Latency ($\text{latency\_ms} = 50.0\text{ms}$)
+### 2.2 Network & Processing Latency (`latency_ms` = 50.0 ms)
 - **Market Data Feed Latency**: At time $t$, the strategy observes delayed market prices and volatility from $t_{\text{obs}} = t - \text{latency\_ms}$.
-- **Order Wire Delay**: Quotes placed or cancelled at time $t$ require $\text{latency\_ms}$ transit before activating at the exchange matching engine.
+- **Order Wire Delay**: Quotes placed or cancelled at time $t$ require `latency_ms` transit before activating at the exchange matching engine.
 - Stale quotes remain exposed at the exchange during rapid price swings, introducing real-world latency-induced adverse selection.
 
 ### 2.3 Hawkes Process & Probabilistic Book-Shape Fills
@@ -79,7 +79,7 @@ The Avellaneda-Stoikov (AS) model does **not** collapse global PnL standard devi
 The core mathematical value of the AS model is **asymmetric tail-risk truncation**:
 - Shifting mean PnL into positive territory by capturing spread on both sides.
 - Truncating catastrophic left-tail drawdowns and fat-tail losses (slashing 99% CVaR / Expected Shortfall).
-- Reducing negative skewness and suppressing excess kurtosis.
+- Reducing negative skewness.
 
 ### 3.2 Avellaneda-Stoikov Pricing Equations
 Under arithmetic Brownian motion $dS_t = \sigma dW_t$:
@@ -114,13 +114,23 @@ Across the 24-hour horizon, BTC/USDT fell by **-\$1,630.20 (-2.29%)** with sever
 | **Avellaneda-Stoikov (Static $\sigma$)** | -\$116.43 | \$37.12 | +0.640 | 0.960 | **0.0112** | **\$233.20** | -17.56 | 10.66 | 1,066 |
 | **Advanced AS (Adaptive $\gamma$, Rolling $\sigma$)** | **+\$152.54** | \$85.63 | -0.580 | 1.830 | **0.0525** | **\$299.32** | **+8.16** | 24.60 | 2,460 |
 
-### Key Historical Takeaways:
+### 4.1 Historical Comparison Chart
+![Historical 3-Way Comparison](figures/historical_3way_comparison.jpg)
+*Figure 1: 24-hour tick backtest across strategies. Top: Mid-price trajectory displaying the -$1,630 market crash. Middle: Inventory trajectories demonstrating that Avellaneda-Stoikov keeps positions strictly bounded near zero, whereas Naive MM gets pegged at the +5 BTC risk limit. Bottom: Total Mark-to-Market PnL evolution highlighting the catastrophic collapse of Naive MM versus robust capital preservation and profit extraction under Advanced AS.*
+
+### 4.2 Key Historical Takeaways
 1. **Elimination of Frictionless Illusions**:
    - In frictionless backtests, Naive MM showed false profits. Under realistic LOB queueing, 50ms latency, and maker fees, Naive MM gets crushed (**-\$9,933.22**, Max Drawdown **\$15,068.34**), repeatedly buying into the downward price cascade and getting pegged at the +5 BTC hard inventory limit.
 2. **Capital Preservation through Skewing**:
    - Both Avellaneda-Stoikov variants protect capital during the \$1,630 market drop. Static AS limits drawdown to \$233.20.
 3. **Alpha Generation via Adaptive Volatility**:
    - Advanced AS adapts its spread dynamically during volatility bursts and aggressively skews its quotes, generating a net profit of **+\$152.54** (net of all maker fees) with an annualized Sharpe ratio of **8.16**.
+
+### 4.3 Advanced AS Deep Dive Chart
+![Advanced AS Deep Dive](figures/advanced_as_deep_dive.jpg)
+*Figure 2: Microstructural dynamics of the Advanced Avellaneda-Stoikov strategy. Top: Detailed 2-hour regime showcasing dynamic quote widening and asymmetric reservation price skewing during rapid price movements. Middle: 24-hour inventory trajectory displaying agile mean-reversion with minimal holding periods. Bottom: Exact PnL decomposition showing how Realized PnL absorbs rapid micro-losses during the selloff to protect total Mark-to-Market capital, before recovering steadily.*
+
+> **Crash Dynamics & Microstructural Risk Analysis**: During the sudden mid-price drop, the strategy absorbs adverse fills as aggressive sellers hit its bids. To maintain strict neutrality ($q \approx 0$) and avoid the massive unrealized losses seen in naive models, the dynamic risk tolerance ($\gamma$) aggressively skews quotes downwards to instantly offload these long micro-positions. Liquidating inventory into a falling market requires selling at lower prices, effectively paying a premium to shed directional risk. This high-frequency mean-reversion keeps the macro inventory visually flat but crystallizes rapid micro-losses, explaining the sharp drop in Realized PnL. Once the shock subsides, the strategy resumes symmetrical spread capture, steadily recovering the Realized PnL to a net positive return.
 
 ---
 
@@ -135,34 +145,38 @@ Rather than assuming standard Geometric Brownian Motion where passive fills are 
 - Drift relaxes toward fundamental drift $\mu$ with decay rate $\beta_{\text{decay}} = 0.25/\text{s}$.
 
 ### Terminal PnL Distribution & Tail Risk Profile:
-| Strategy | Mean PnL ($) | Std Dev ($) | Skewness | Excess Kurtosis | 99% VaR ($) | 99% CVaR ($) |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Naive Market Making** | \$43.89 | \$45.50 | -0.24 | +4.96 | -\$80.47 | -\$128.65 |
-| **Avellaneda-Stoikov (Static $\sigma$)** | \$45.26 | \$28.25 | -0.43 | +3.87 | **-\$27.35** | **-\$58.86** |
-| **Advanced AS (Adaptive $\gamma$, Rolling $\sigma$)** | **\$45.18** | \$26.50 | -0.34 | +3.99 | **-\$24.64** | **-\$49.74** |
+| Strategy | Mean PnL ($) | Std Dev ($) | Skewness | 99% VaR ($) | 99% CVaR ($) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Naive Market Making** | \$47.23 | \$40.69 | +0.14 | -\$53.97 | -\$79.54 |
+| **Avellaneda-Stoikov (Static $\sigma$)** | \$46.84 | \$26.37 | +0.18 | **-\$16.90** | **-\$41.76** |
+| **Advanced AS (Adaptive $\gamma$, Rolling $\sigma$)** | **\$46.53** | \$24.96 | +0.18 | **-\$8.32** | **-\$33.69** |
 
-### Tail Risk & Higher Moments Insights:
+### 5.1 Monte Carlo Risk Profile Chart
+![Monte Carlo Terminal PnL Distribution](figures/monte_carlo_pnl_distribution.jpg)
+*Figure 3: Terminal PnL distributions ($M = 1,000$ paths) under micro-price jump-diffusion and adverse selection. The Kernel Density Estimation (KDE) curves highlight how Avellaneda-Stoikov strategies truncate the catastrophic left tail (cutting 99% CVaR from -$79.54 to -$33.69 for Advanced AS). Global standard deviation remains stable around ~$25-$26, demonstrating that AS operates via asymmetric tail-risk truncation rather than global variance elimination.*
+
+### 5.2 Tail Risk Insights
 1. **Asymmetric Tail-Risk Truncation**:
-   - Naive MM experiences severe adverse selection losses in the left tail (99% CVaR / Expected Shortfall of **-\$128.65**).
-   - Advanced AS truncates this tail risk by **\$78.91 per run** (99% CVaR of **-\$49.74**), cutting tail losses by **61.3%**.
-2. **Higher Excess Kurtosis in Naive MM**:
-   - Naive MM displays high excess kurtosis (+4.96), confirming fat tails and vulnerability to extreme market dislocations. AS skews dampen outlier impacts.
+   - Naive MM experiences heavy adverse selection losses in the left tail (99% CVaR / Expected Shortfall of **-\$79.54**).
+   - Advanced AS truncates this tail risk significantly (99% CVaR of **-\$33.69**), cutting tail losses by **57.6%**.
+2. **Mean Preservation with Lower Downside Risk**:
+   - Advanced AS achieves a 99% VaR of just **-\$8.32**, compared to **-\$53.97** for Naive MM, while maintaining identical average profitability ($~\$46.50$), proving exceptional risk-adjusted capital efficiency.
 
 ---
 
 ## 6. Generated Publication Figures
 
-- **[Figure 1: Historical 3-Way Comparison](figures/historical_3way_comparison.png)**:
+- **[Figure 1: Historical 3-Way Comparison](figures/historical_3way_comparison.jpg)**:
   - Top: 24h Binance BTC/USDT mid-price trajectory.
   - Middle: Inventory trajectories ($q_t$) demonstrating inventory bounding at $\pm 5$ BTC under queue delay.
   - Bottom: Total Mark-to-Market PnL evolution demonstrating capital preservation by AS vs collapse of Naive MM.
-- **[Figure 2: Advanced AS Deep Dive](figures/advanced_as_deep_dive.png)**:
+- **[Figure 2: Advanced AS Deep Dive](figures/advanced_as_deep_dive.jpg)**:
   - Top: 2-hour detail displaying dynamic quote skewing and spread widening during volatility shocks.
   - Middle: 24-hour mean-reverting inventory trajectory.
   - Bottom: Mark-to-Market PnL decomposition: Realized PnL (locked cash) vs Unrealized PnL.
-- **[Figure 3: Monte Carlo Terminal PnL Distribution](figures/monte_carlo_pnl_distribution.png)**:
+- **[Figure 3: Monte Carlo Terminal PnL Distribution](figures/monte_carlo_pnl_distribution.jpg)**:
   - Terminal PnL distribution KDE highlighting left-tail truncation and 99% CVaR thresholds.
-  - Embedded risk summary table detailing Mean, Std Dev, Skewness, Kurtosis, 99% VaR, and 99% CVaR.
+  - Embedded risk summary table detailing Mean, Std Dev, Skewness, 99% VaR, and 99% CVaR.
 
 ---
 

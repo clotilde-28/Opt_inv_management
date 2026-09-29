@@ -261,7 +261,6 @@ def main():
             "Mean PnL ($)": f"${st['mean']:,.2f}",
             "Std Dev ($)": f"${st['std']:,.2f}",
             "Skewness": f"{st['skewness']:+.2f}",
-            "Kurtosis": f"{st['kurtosis']:+.2f}",
             "99% VaR ($)": f"{sign_var}${st['var_99']:,.2f}",
             "99% CVaR ($)": f"{sign_cvar}${st['cvar_99']:,.2f}",
         })
