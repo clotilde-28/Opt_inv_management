@@ -46,7 +46,7 @@ class NaiveStrategy(BaseStrategy):
 
     def __init__(
         self, 
-        fixed_spread: float = 6.0, 
+        fixed_spread: float = 2.0, 
         q_max: float = 5.0, 
         lot_size: float = 0.01
     ):
